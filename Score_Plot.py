@@ -23,7 +23,7 @@ def score_plot(X, w, pairs, fp, label=None, figname='ScorePlot', cmax=None, cmin
 
     X = X[:, order_w]
 
-    if label != None:
+    if label is not None:
 
         if cmax is None:
             cmax = np.max(label[~np.isnan(label)])
