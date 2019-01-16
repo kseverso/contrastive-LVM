@@ -53,7 +53,9 @@ def build_toy_dataset():
     return A, B, labels
 
 """
-Variable names consistent with "Unsupervised Learning with Contrastive Latent Variable Models" except for k_target
+Variable names consistent with "Unsupervised Learning with Contrastive Latent Variable Models" 
+except loading factor dimensionality k and t --> k_shared and k_target
+
 x, y = oberved data with dimensions x: d x n and y: d x m
 zi, zj = shared latent variables with dimensions: k_shared
 ti = lower dimensional representation unique to target data with dimensions: k_target
