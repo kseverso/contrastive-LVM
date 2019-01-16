@@ -54,7 +54,7 @@ def build_toy_dataset():
 
 """
 Variable names consistent with "Unsupervised Learning with Contrastive Latent Variable Models" except for k_target
-x, y = oberved data with dimensions x: d x m and y: d x m
+x, y = oberved data with dimensions x: d x n and y: d x m
 zi, zj = shared latent variables with dimensions: k_shared
 ti = lower dimensional representation unique to target data with dimensions: k_target
 qzi, qzj, qti = variational gaussian rep for zi, zj, ti respectively
