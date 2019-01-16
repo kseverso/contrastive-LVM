@@ -53,12 +53,13 @@ def build_toy_dataset():
     return A, B, labels
 
 """
-Variable names consistent with "Unsupervised Learning with Contrastive Latent Variable Models" 
-except loading factor dimensionality k and t --> k_shared and k_target
+Variable names consistent with those in
+"Unsupervised Learning with Contrastive Latent Variable Models" 
+except loading factor dimensionalities k and t --> k_shared and k_target
 
 x, y = oberved data with dimensions x: d x n and y: d x m
 zi, zj = shared latent variables with dimensions: k_shared
-ti = lower dimensional representation unique to target data with dimensions: k_target
+ti = target latent variables with dimensions: k_target
 qzi, qzj, qti = variational gaussian rep for zi, zj, ti respectively
 s = shared factor loading with dimensions: d x k_shared
 w = target factor loading with dimensions: d x k_target
@@ -66,26 +67,28 @@ noise = noise
 """
 
 class clvm:
-    def __init__(self, target, background, k_shared, k_target):
+    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2):
 
-        self.n, self.d = target.shape
-        self.m = background.shape[0]
-        self.target = target
-        self.background = background
+        self.n, self.d = target_dataset.shape
+        self.m = background_dataset.shape[0]
+        self.target_dataset = target_dataset
+        self.background_dataset = background_dataset
         self.k_shared = k_shared
-        self.k_target =k_target
+        self.k_target = k_target
 
-        self.log_joint = ed.make_log_joint_fn(self.probabilistic_pca)
+        self.log_joint = ed.make_log_joint_fn(self.clvm_data)
         self.log_q = ed.make_log_joint_fn(self.variational_model)
 
-    def probabilistic_pca(self):  # (unmodeled) data
+    def clvm_data(self):  # (unmodeled) data
         # Parameters
         # shared factor loading
-        s = tf.get_variable("w", shape = [self.k_shared, self.d])# initializer=tf.ones([self.k_shared, self.d], dtype=tf.float32))
+        s = tf.get_variable("s", shape = [self.k_shared, self.d])
         # target factor loading
-        w = tf.get_variable("bx", shape=[self.k_target, self.d])#initializer=tf.ones([self.k_target, self.d], dtype=tf.float32))
+        w = tf.get_variable("w", shape=[self.k_target, self.d])
         # noise
-        noise = tf.get_variable("s", initializer=tf.ones([1], dtype=tf.float32))
+        noise = tf.get_variable("noise", initializer=tf.ones([1], dtype=tf.float32))
+
+        # note: using initializer=tf.ones([self.k_shared, self.d], dtype=tf.float32)) caused issues
 
         # Latent vectors
         zi = ed.Normal(loc=tf.zeros([self.n, self.k_shared]), scale=tf.ones([self.n, self.k_shared]), name='zi')
@@ -107,20 +110,20 @@ class clvm:
 
         return qzi, qzj, qti
 
-    def fn(self, zi, zj, ti):
-        return self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target, y=self.background)
+    def target(self, zi, zj, ti):
+        return self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
 
     def target_q(self, qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
         return self.log_q(qzi=qzi, qzj=qzj, qti=qti, qzi_mean=qzi_mean, qzi_stddv=qzi_stddv,
                           qzj_mean=qzj_mean, qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
 
-    def map(self):
+    def map(self, num_epochs = 1500):
 
         zi = tf.Variable(np.ones([self.n, self.k_shared]), dtype=tf.float32)
         zj = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
         ti = tf.Variable(np.ones([self.n, self.k_target]), dtype=tf.float32)
 
-        energy = -self.fn(zi, zj, ti)
+        energy = -self.target(zi, zj, ti)
 
         optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
         train = optimizer.minimize(energy)
@@ -128,8 +131,6 @@ class clvm:
         init = tf.global_variables_initializer()
 
         learning_curve = []
-
-        num_epochs = 500
 
         with tf.Session() as sess:
             sess.run(init)
@@ -140,9 +141,9 @@ class clvm:
                     cE, _cx, _cy, _ci = sess.run([energy, zi, zj, ti])
                     learning_curve.append(cE)
 
-            z_inferred_map = sess.run(ti)
+            t_inferred_map = sess.run(ti)
 
-        return z_inferred_map
+        return t_inferred_map
 
     def variational_inference(self, num_epochs = 1500):
 
@@ -156,7 +157,7 @@ class clvm:
         qzi, qzj, qti = self.variational_model(qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qzj_mean=qzj_mean,
                                                qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
 
-        energy = self.fn(qzi, qzj, qti)
+        energy = self.target(qzi, qzj, qti)
         entropy = -self.target_q(qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv)
 
         elbo = energy + entropy
@@ -176,14 +177,14 @@ class clvm:
                 if i % 5 == 0:
                     learning_curve.append(sess.run([elbo]))
 
-            zi_inferred = sess.run(qti_mean)
+            ti_inferred = sess.run(qti_mean)
 
         plt.figure()
         plt.plot(range(1, num_epochs, 5), learning_curve)
         plt.show()
 
 
-        return zi_inferred
+        return ti_inferred
 
 
 
@@ -192,7 +193,7 @@ if __name__ == '__main__':
     print('shape of target data:', x_train.shape)
     print('shape of background data:', y_train.shape)
 
-    model = clvm(x_train, y_train, 10, 2)
+    model = clvm(x_train, y_train, 8, 2)
 
     z_post = model.map()
     print('MAP ti shape:', z_post.shape)
