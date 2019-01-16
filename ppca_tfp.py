@@ -71,7 +71,7 @@ class ppca_model:
 
         w = tf.Variable(np.ones([self.k, self.d]), dtype=tf.float32)
         z = tf.Variable(np.ones([self.n, self.k]), dtype=tf.float32)
-
+        print('test what is target:', self.target(w, z))
         energy = -self.target(w, z)
 
         optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
