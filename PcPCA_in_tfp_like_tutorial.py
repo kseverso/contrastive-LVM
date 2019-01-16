@@ -173,7 +173,7 @@ class PcPCA:
 
     with tf.variable_scope('', reuse=tf.AUTO_REUSE):
       #Noise parameter
-      self.s = tf.get_variable(shape=[1], name='sigmax', initializer=tf.ones_initializer())
+      self.s = tf.get_variable(shape=[], name='sigmax', initializer=tf.ones_initializer())
 
       #Shared factor loading
       self.w = tf.get_variable(shape=[self.Ks, self.m], name='W')
@@ -188,9 +188,9 @@ class PcPCA:
 
       #Observed vectors
       self.x = ed.Normal(loc=tf.matmul(self.zx, self.w) + tf.matmul(self.zi, self.bx),
-                      scale=self.s * tf.ones([self.nx, self.m]), name="x")
+                      scale=tf.ones([self.nx, self.m]), name="x")
       self.y = ed.Normal(loc=tf.matmul(self.zy, self.w),
-                      scale=tf.reciprocal(self.s) * tf.ones([self.ny, self.m]), name="y")
+                      scale=tf.ones([self.ny, self.m]), name="y")
     
     return (self.x, self.y), (self.s, self.w, self.bx), (self.zx, self.zy, self.zi)
 
@@ -295,75 +295,75 @@ class PcPCA:
   def learn_model(self, lrt=0.05, num_epochs=100, graphStepSize = 5, seed=0, fn='PcPCA'):
     elbo, qzx_mean, qzx_stddv, qzy_mean, qzy_stddv,qzi_mean, qzi_stddv = self.variational_inference()
     optimizer = tf.train.AdamOptimizer(learning_rate=lrt)
-    train = optimizer.minimize(-elbo)
-    # try:
-    #   train = optimizer.minimize(-elbo)
-    # except ValueError:
-    #   print("shape", tf.shape(elbo))
-    #   print(optimizer.variables())
     
+    try:
+      train = optimizer.minimize(-elbo)
+    except ValueError:
+      print("shape", tf.shape(elbo))
+      print(optimizer.variables())
+    
+    train = optimizer.minimize(-elbo)
+    # init = tf.global_variables_initializer()
 
-    init = tf.global_variables_initializer()
+    # t = []
 
-    t = []
+    # with tf.Session() as sess:
+    #   sess.run(init)
 
-    with tf.Session() as sess:
-      sess.run(init)
+    #   for i in range(num_epochs):
+    #     sess.run(train)
+    #     if i % graphStepSize == 0:
+    #       t.append(sess.run([elbo]))
 
-      for i in range(num_epochs):
-        sess.run(train)
-        if i % graphStepSize == 0:
-          t.append(sess.run([elbo]))
+    #   z_post = sess.run(qzi_mean)
+    #   # zi_stddv_inferred = sess.run(qzi_stddv)
+    #   zx_post = sess.run(qzx_mean)
+    #   # zx_stddv_inferred = sess.run(qzx_stddv)
+    #   zy_post = sess.run(qzy_mean)
+    #   # zy_stddv_inferred = sess.run(qzy_stddv)
+    #   # z_post = sess.run(self.qzi.mean())
+    #   # zx_post = sess.run(self.qzx.mean())
+    #   # zy_post = sess.run(self.qzy.mean())
 
-      z_post = sess.run(qzi_mean)
-      # zi_stddv_inferred = sess.run(qzi_stddv)
-      zx_post = sess.run(qzx_mean)
-      # zx_stddv_inferred = sess.run(qzx_stddv)
-      zy_post = sess.run(qzy_mean)
-      # zy_stddv_inferred = sess.run(qzy_stddv)
-      # z_post = sess.run(self.qzi.mean())
-      # zx_post = sess.run(self.qzx.mean())
-      # zy_post = sess.run(self.qzy.mean())
+    #   bx_post = self.bx.eval()
+    #   w_post = self.w.eval()
+    #   s_post = self.s.eval()
 
-      bx_post = self.bx.eval()
-      w_post = self.w.eval()
-      s_post = self.s.eval()
+    #   model = {'lb': t,
+    #              'S': w_post,
+    #              'W': bx_post,
+    #              'sigma': s_post,
+    #              'zx': zx_post,
+    #              'zy': zy_post,
+    #              'zi': z_post}
 
-      model = {'lb': t,
-                 'S': w_post,
-                 'W': bx_post,
-                 'sigma': s_post,
-                 'zx': zx_post,
-                 'zy': zy_post,
-                 'zi': z_post}
+    # bx_col = LA.norm(bx_post, axis=1)
+    # order_b = np.argsort(bx_col)
+    # c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+    # ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
+    # plt.figure()
+    # for i, l in enumerate(np.sort(np.unique(labels))):
+    #     idx = np.where(labels==l)
+    #     plt.scatter(z_post[idx, order_b[-1]], z_post[idx, order_b[-2]], marker=ms[i], color=c[i])
+    # plt.title("Target Latent Space")
+    # plt.savefig('./experiments/Edward/' + 't' + str(seed) + '.png')
 
-    bx_col = LA.norm(bx_post, axis=1)
-    order_b = np.argsort(bx_col)
-    c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
-    ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
-    plt.figure()
-    for i, l in enumerate(np.sort(np.unique(labels))):
-        idx = np.where(labels==l)
-        plt.scatter(z_post[idx, order_b[-1]], z_post[idx, order_b[-2]], marker=ms[i], color=c[i])
-    plt.title("Target Latent Space")
-    plt.savefig('./experiments/Edward/' + 't' + str(seed) + '.png')
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # for i, l in enumerate(np.sort(np.unique(labels))):
+    #     idx = np.where(labels == l)
+    #     plt.scatter(zx_post[idx, 0], zx_post[idx, 1], marker=ms[i], color=c[i])
+    # plt.title("Target Class Shared Space")
 
-    plt.figure()
-    plt.subplot(1, 2, 1)
-    for i, l in enumerate(np.sort(np.unique(labels))):
-        idx = np.where(labels == l)
-        plt.scatter(zx_post[idx, 0], zx_post[idx, 1], marker=ms[i], color=c[i])
-    plt.title("Target Class Shared Space")
+    # plt.subplot(1, 2, 2)
+    # plt.scatter(zy_post[:, 0], zy_post[:, 1])
+    # plt.title("Background Class Shared Space")
+    # plt.savefig('./experiments/Edward/z' + str(seed) + '.png')
 
-    plt.subplot(1, 2, 2)
-    plt.scatter(zy_post[:, 0], zy_post[:, 1])
-    plt.title("Background Class Shared Space")
-    plt.savefig('./experiments/Edward/z' + str(seed) + '.png')
+    # save_name = 'experiments/Edward/' + fn + 'obj' + str(seed) + '.pkl'
+    # joblib.dump(model, save_name)
 
-    save_name = 'experiments/Edward/' + fn + 'obj' + str(seed) + '.pkl'
-    joblib.dump(model, save_name)
-
-    return z_post, zx_post, zy_post, bx_post, w_post, s_post
+    # return z_post, zx_post, zy_post, bx_post, w_post, s_post
 
 if __name__ == '__main__':
     Shared = False
