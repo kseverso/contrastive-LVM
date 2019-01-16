@@ -3,6 +3,7 @@ matplotlib.use("TkAgg")
 from matplotlib import pyplot as plt
 import numpy as np
 import seaborn as sns
+import argparse
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -117,7 +118,8 @@ class clvm:
         return self.log_q(qzi=qzi, qzj=qzj, qti=qti, qzi_mean=qzi_mean, qzi_stddv=qzi_stddv,
                           qzj_mean=qzj_mean, qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
 
-    def map(self, num_epochs = 1500):
+    def map(self, num_epochs = 1500, plot=True):
+        tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
         zi = tf.Variable(np.ones([self.n, self.k_shared]), dtype=tf.float32)
         zj = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
@@ -142,10 +144,24 @@ class clvm:
                     learning_curve.append(cE)
 
             t_inferred_map = sess.run(ti)
+        if (plot):
+            print('MAP ti shape:', t_inferred_map.shape)
+
+            c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
+                'tab:gray', 'tab:olive', 'tab:cyan']
+            ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
+            plt.figure()
+            for i, l in enumerate(np.sort(np.unique(labels))):
+                idx = np.where(labels == l)
+                plt.scatter(t_inferred_map[idx, 0], t_inferred_map[idx, 1], marker=ms[i], color=c[i])
+            plt.title("Target Latent Space MAP")
+            plt.show()
 
         return t_inferred_map
 
-    def variational_inference(self, num_epochs = 1500):
+    def variational_inference(self, num_epochs = 1500, plot=True):
+
+        tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
         qzi_mean = tf.Variable(np.ones([self.n, self.k_shared]), dtype=tf.float32)
         qzj_mean = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
@@ -179,9 +195,23 @@ class clvm:
 
             ti_inferred = sess.run(qti_mean)
 
-        plt.figure()
-        plt.plot(range(1, num_epochs, 5), learning_curve)
-        plt.show()
+        if (plot):
+            plt.figure()
+            plt.plot(range(1, num_epochs, 5), learning_curve)
+            plt.title("Learning Curve VI")
+
+            print('VI ti shape:', ti_inferred.shape)
+
+            plt.figure()
+            c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
+                'tab:gray', 'tab:olive', 'tab:cyan']
+            ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
+            for i, l in enumerate(np.sort(np.unique(labels))):
+                idx = np.where(labels == l)
+                plt.scatter(ti_inferred[idx, 0], ti_inferred[idx, 1], marker=ms[i], color=c[i])
+            plt.title("Target Latent Space VI")
+
+            plt.show()
 
 
         return ti_inferred
@@ -189,36 +219,19 @@ class clvm:
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--k_shared", default=10)
+    parser.add_argument("--k_target", default=2)
+    parser.add_argument("--plot", default=True)
+    args = parser.parse_args()
+
     x_train, y_train, labels = build_toy_dataset()
     print('shape of target data:', x_train.shape)
     print('shape of background data:', y_train.shape)
 
-    model = clvm(x_train, y_train, 8, 2)
-
-    z_post = model.map()
-    print('MAP ti shape:', z_post.shape)
-
-    c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
-         'tab:gray', 'tab:olive', 'tab:cyan']
-    ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
-    plt.figure()
-    for i, l in enumerate(np.sort(np.unique(labels))):
-        idx = np.where(labels == l)
-        plt.scatter(z_post[idx, 0], z_post[idx, 1], marker=ms[i], color=c[i])
-    plt.title("Target Latent Space MAP")
-
-    tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
-
-    z_post = model.variational_inference()
-    print('VI ti shape:', z_post.shape)
-
-    plt.figure()
-    for i, l in enumerate(np.sort(np.unique(labels))):
-        idx = np.where(labels == l)
-        plt.scatter(z_post[idx, 0], z_post[idx, 1], marker=ms[i], color=c[i])
-    plt.title("Target Latent Space VI")
-
-    plt.show()
+    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target))
+    model.map(plot=args.plot)
+    model.variational_inference(plot=args.plot)
 
 
 
