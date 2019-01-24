@@ -145,6 +145,14 @@ class clvm:
                 distribution=ed.Normal(loc, tf.maximum(tf.nn.softplus(scale), min_scale)),
                 bijector=bij.Exp())
             return rv
+            
+    # from "Upgrading from Edward to Edward2" tutorial
+    def trainable_gamma(self, shape, name=None):
+        """Learnable Gamma via shape and scale parameterization."""
+        with tf.variable_scope(None, default_name="trainable_gamma"):
+            return ed.Gamma(tf.nn.softplus(tf.get_variable("shape", shape)),
+                        1.0 / tf.nn.softplus(tf.get_variable("scale", shape)),
+                        name=name)
 
     def create_model_shell(self, seed=0):  # (unmodeled) data
         #Specify model
@@ -309,14 +317,26 @@ class clvm:
         qzy_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
         qzi_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_target]), dtype=tf.float32))
 
-        qw_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-        qbx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-        qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
-        qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
+        if self.BackgroundARD:
+            qw_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+            qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
+            qalpha_shape = self.alpha.shape
+        else:
+            qw_mean = None
+            qw_stddv = None
+            qalpha_shape = None
+        if self.TargetARD:
+            qbx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+            qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
+            qbeta_shape = self.beta.shape
+        else:
+            qbx_mean = None
+            qbx_stddv = None
+            qbeta_shape = None
 
         qs_shape = self.s.shape
-        qalpha_shape = self.alpha.shape
-        qbeta_shape = self.beta.shape
+        
+        
 
         (qzx, qzy, qzi), (qs, qalpha, qw, qbeta, qbx) = self.variational_model(qzx_mean=qzx_mean, qzx_stddv=qzx_stddv, qzy_mean=qzy_mean, qzy_stddv=qzy_stddv, 
         qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qw_mean=qw_mean, qw_stddv=qw_stddv, qbx_mean=qbx_mean, qbx_stddv=qbx_stddv, 
