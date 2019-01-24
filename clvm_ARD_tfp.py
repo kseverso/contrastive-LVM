@@ -149,33 +149,35 @@ class clvm:
     def create_model_shell(self, seed=0):  # (unmodeled) data
         #Specify model
         if self.BackgroundARD:
-            Ks = self.m-3 #latent dimensionality of shared space
+            self.Ks = self.m-3 #latent dimensionality of shared space
         if self.TargetARD:
-            Ki = self.m-1 #latent dimensionality of indepedent space
+            self.Ki = self.m-1 #latent dimensionality of indepedent space
+
+        #what should Ks and Ki be if they are not specified above??
 
         #Robustness
         self.s = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]))
 
         #ARD, Shared space
         if self.BackgroundARD:
-            self.alpha = ed.Gamma(concentration=1e-3*tf.ones([Ks]), rate=1e-3*tf.ones([Ks]))
-            self.w = ed.Normal(loc=tf.zeros([Ks, self.m]),
+            self.alpha = ed.Gamma(concentration=1e-3*tf.ones([self.Ks]), rate=1e-3*tf.ones([self.Ks]))
+            self.w = ed.Normal(loc=tf.zeros([self.Ks, self.m]),
                             scale=tf.einsum('i,j->ij', tf.reciprocal(self.alpha), tf.ones([self.m])), name='w')
         else:
-            self.w = tf.get_variable(shape=[Ks, self.m], name='W')
+            self.w = tf.get_variable(shape=[self.Ks, self.m], name='W')
 
         #ARD, Target space
         if self.TargetARD:
-            self.beta = ed.Gamma(concentration=1e-3*tf.ones([Ki]), rate=1e-3*tf.ones([Ki]))
-            self.bx = ed.Normal(loc=tf.zeros([Ki, self.m]),
+            self.beta = ed.Gamma(concentration=1e-3*tf.ones([self.Ki]), rate=1e-3*tf.ones([self.Ki]))
+            self.bx = ed.Normal(loc=tf.zeros([self.Ki, self.m]),
                          scale=tf.einsum('i,j->ij', tf.reciprocal(self.beta), tf.ones([self.m])), name='bx')
         else:
-            self.bx = tf.get_variable(shape=[Ki, self.m], name='Bx')
+            self.bx = tf.get_variable(shape=[self.Ki, self.m], name='Bx')
 
         #Latent vectors
-        zx = ed.Normal(loc=tf.zeros([self.nx, Ks]), scale=tf.ones([self.nx, Ks]), name='zx')
-        zy = ed.Normal(loc=tf.zeros([self.ny, Ks]), scale=tf.ones([self.ny, Ks]), name='zy')
-        zi = ed.Normal(loc=tf.zeros([self.nx, Ki]), scale=tf.ones([self.nx, Ki]), name='zi')
+        zx = ed.Normal(loc=tf.zeros([self.nx, self.Ks]), scale=tf.ones([self.nx, self.Ks]), name='zx')
+        zy = ed.Normal(loc=tf.zeros([self.ny, self.Ks]), scale=tf.ones([self.ny, self.Ks]), name='zy')
+        zi = ed.Normal(loc=tf.zeros([self.nx, self.Ki]), scale=tf.ones([self.nx, self.Ki]), name='zi')
 
         #Observed vectors
         x = ed.Normal(loc=tf.matmul(zx, self.w) + tf.matmul(zi, self.bx),
@@ -186,16 +188,17 @@ class clvm:
         return (x, y), (zx, zy, zi)
 
     def variational_model(self, qzx_mean, qzx_stddv, qzy_mean, qzy_stddv, qzi_mean, 
-        qzi_stddv, qw_mean, qw_stddv, qbx_mean, qbx_stddv,seed=0):
+        qzi_stddv, qw_mean, qw_stddv, qbx_mean, qbx_stddv, 
+        qs_shape, qalpha_shape, qbeta_shape, seed=0):
 
         variational_model_variables = dict()
         #Robustness
-        qs = self.lognormal_q(self.s.shape)
+        qs = self.lognormal_q(qs_shape)
         variational_model_variables["qs"] = qs
 
         #ARD, Shared space
         if self.BackgroundARD:
-            qalpha = self.lognormal_q(self.alpha.shape)
+            qalpha = self.lognormal_q(qalpha_shape)
             qw = ed.Normal(loc=qw_mean, scale=qw_stddv)
             variational_model_variables["qalpha"] = qalpha
             variational_model_variables["qw"] = qw
@@ -205,7 +208,7 @@ class clvm:
 
         #ARD, Target space
         if self.TargetARD: 
-            qbeta = self.lognormal_q(self.beta.shape)
+            qbeta = self.lognormal_q(qbeta_shape)
             qbx = ed.Normal(loc=qbx_mean, scale=qbx_stddv)
             variational_model_variables["qbeta"] = qbeta
             variational_model_variables["qbx"] = qbx
@@ -311,8 +314,13 @@ class clvm:
         qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
         qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
 
+        qs_shape = self.s.shape
+        qalpha_shape = self.alpha.shape
+        qbeta_shape = self.beta.shape
+
         (qzx, qzy, qzi), (qs, qalpha, qw, qbeta, qbx) = self.variational_model(qzx_mean=qzx_mean, qzx_stddv=qzx_stddv, qzy_mean=qzy_mean, qzy_stddv=qzy_stddv, 
-        qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qw_mean=qw_mean, qw_stddv=qw_stddv, qbx_mean=qbx_mean, qbx_stddv=qbx_stddv)
+        qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qw_mean=qw_mean, qw_stddv=qw_stddv, qbx_mean=qbx_mean, qbx_stddv=qbx_stddv, 
+        qs_shape=qs_shape, qalpha_shape=qalpha_shape, qbeta_shape=qbeta_shape)
 
         energy = self.target(qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha)
         entropy = -self.target_q(qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
