@@ -107,12 +107,12 @@ class clvm:
         self.ny = background_dataset.shape[0]
         self.target_dataset = target_dataset
         self.background_dataset = background_dataset
-        self.k_shared = k_shared
-        self.k_target = k_target
+        self.k_shared = self.m-3
+        self.k_target = self.m-1
         self.TargetARD = TargetARD
         self.BackgroundARD=BackgroundARD
-        self.Ks=k_shared
-        self.Ki=k_target
+        self.Ks=self.m-3
+        self.Ki=self.m-1
         
         # robustness parameter and its correponding inference variable
         self.s = None
@@ -148,16 +148,16 @@ class clvm:
 
     def create_model_shell(self, seed=0):  # (unmodeled) data
         #Specify model
-        if BackgroundARD:
+        if self.BackgroundARD:
             Ks = self.m-3 #latent dimensionality of shared space
-        if TargetARD:
+        if self.TargetARD:
             Ki = self.m-1 #latent dimensionality of indepedent space
 
         #Robustness
         self.s = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]))
 
         #ARD, Shared space
-        if BackgroundARD:
+        if self.BackgroundARD:
             self.alpha = ed.Gamma(concentration=1e-3*tf.ones([Ks]), rate=1e-3*tf.ones([Ks]))
             self.w = ed.Normal(loc=tf.zeros([Ks, self.m]),
                             scale=tf.einsum('i,j->ij', tf.reciprocal(self.alpha), tf.ones([self.m])), name='w')
@@ -165,7 +165,7 @@ class clvm:
             self.w = tf.get_variable(shape=[Ks, self.m], name='W')
 
         #ARD, Target space
-        if TargetARD:
+        if self.TargetARD:
             self.beta = ed.Gamma(concentration=1e-3*tf.ones([Ki]), rate=1e-3*tf.ones([Ki]))
             self.bx = ed.Normal(loc=tf.zeros([Ki, self.m]),
                          scale=tf.einsum('i,j->ij', tf.reciprocal(self.beta), tf.ones([self.m])), name='bx')
@@ -194,7 +194,7 @@ class clvm:
         variational_model_variables["qs"] = qs
 
         #ARD, Shared space
-        if BackgroundARD:
+        if self.BackgroundARD:
             qalpha = self.lognormal_q(self.alpha.shape)
             qw = ed.Normal(loc=qw_mean, scale=qw_stddv)
             variational_model_variables["qalpha"] = qalpha
@@ -204,7 +204,7 @@ class clvm:
             qw=None
 
         #ARD, Target space
-        if TargetARD: 
+        if self.TargetARD: 
             qbeta = self.lognormal_q(self.beta.shape)
             qbx = ed.Normal(loc=qbx_mean, scale=qbx_stddv)
             variational_model_variables["qbeta"] = qbeta
@@ -311,7 +311,6 @@ class clvm:
         qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
         qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
 
-
         (qzx, qzy, qzi), (qs, qalpha, qw, qbeta, qbx) = self.variational_model(qzx_mean=qzx_mean, qzx_stddv=qzx_stddv, qzy_mean=qzy_mean, qzy_stddv=qzy_stddv, 
         qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qw_mean=qw_mean, qw_stddv=qw_stddv, qbx_mean=qbx_mean, qbx_stddv=qbx_stddv)
 
@@ -337,7 +336,15 @@ class clvm:
                 if i % 5 == 0:
                     learning_curve.append(sess.run([elbo]))
 
-            ti_inferred = sess.run(qti_mean)
+            ti_inferred = sess.run(qzi_mean)
+            if self.TargetARD:
+                bx_post = sess.run(qbx) #would need to make this a global variable??
+            else:
+                bx_post = self.bx.eval()
+            if self.BackgroundARD:
+                w_post = sess.run(qw) #would need to make this a global variable??
+            else:
+                w_post = self.w.eval()
 
         if (plot):
             plt.figure()
@@ -358,7 +365,7 @@ class clvm:
             plt.show()
 
 
-        return ti_inferred
+        return ti_inferred, bx_post, w_post
 
 
 
