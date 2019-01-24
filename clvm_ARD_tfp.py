@@ -232,7 +232,7 @@ class clvm:
                           qti_mean=qti_mean, qti_stddv=qti_stddv)
     
     def target(self, zx, zy, zi, s, beta, bx, w, alpha):
-        return self.log_joint(zx=zx, zy=zy, zi=zi, s=s, x=self.target_dataset, y=self.background_dataset, beta=beta, bx=bx, w=w, alpha=alpha)
+        return self.log_joint(zx=zx, zy=zy, zi=zi, s=self.s, x=self.target_dataset, y=self.background_dataset, beta=self.beta, bx=self.bx, w=self.w, alpha=self.alpha)
 
     def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
                 qzx_mean, qzy_mean, qzi_mean, qs_mean, qbeta_mean, qbx_mean, qw_mean, qalpha_mean,
@@ -241,14 +241,16 @@ class clvm:
                 qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qs_mean=qs_mean, qbeta_mean=qbeta_mean, qbx_mean=qbx_mean, qw_mean=qw_mean, qalpha_mean=qalpha_mean,
                 qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qs_stddv=qs_stddv, qbeta_stddv=qbeta_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv, qalpha_stddv=qalpha_stddv)
 
+########################################################################
+
     def map(self, num_epochs = 1500, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        zi = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-        zj = tf.Variable(np.ones([self.nx, self.k_shared]), dtype=tf.float32)
-        ti = tf.Variable(np.ones([self.nx, self.k_target]), dtype=tf.float32)
+        zx = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+        zy = tf.Variable(np.ones([self.nx, self.k_shared]), dtype=tf.float32)
+        zi = tf.Variable(np.ones([self.nx, self.k_target]), dtype=tf.float32)
 
-        energy = -self.target(zi, zj, ti)
+        energy = -self.target(zx, zy, zi, self.s, self.beta, self.bx, self.w, self.alpha)
 
         optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
         train = optimizer.minimize(energy)
@@ -263,10 +265,10 @@ class clvm:
             for i in range(num_epochs):
                 sess.run(train)
                 if i % 5 == 0:
-                    cE, _cx, _cy, _ci = sess.run([energy, zi, zj, ti])
+                    cE, _cx, _cy, _ci = sess.run([energy, zx, zy, zi])
                     learning_curve.append(cE)
 
-            t_inferred_map = sess.run(ti)
+            t_inferred_map = sess.run(zi)
         if (plot):
             print('MAP ti shape:', t_inferred_map.shape)
 
