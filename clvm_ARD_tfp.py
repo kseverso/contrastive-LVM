@@ -109,6 +109,10 @@ class clvm:
         self.background_dataset = background_dataset
         self.k_shared = k_shared
         self.k_target = k_target
+        self.TargetARD = TargetARD
+        self.BackgroundARD=BackgroundARD
+        self.Ks=k_shared
+        self.Ki=k_target
         
         # robustness parameter and its correponding inference variable
         self.s = None
@@ -142,7 +146,7 @@ class clvm:
                 bijector=bij.Exp())
             return rv
 
-    def create_model_shell(self,TargetARD, BackgroundARD, Ks, Ki, seed=0):  # (unmodeled) data
+    def create_model_shell(self, seed=0):  # (unmodeled) data
         #Specify model
         if BackgroundARD:
             Ks = self.m-3 #latent dimensionality of shared space
@@ -181,8 +185,7 @@ class clvm:
         
         return (x, y), (zx, zy, zi)
 
-    def variational_model(self, TargetARD, BackgroundARD, Ks, Ki, 
-        qzx_mean, qzx_stddv, qzy_mean, qzy_stddv, qzi_mean, 
+    def variational_model(self, qzx_mean, qzx_stddv, qzy_mean, qzy_stddv, qzi_mean, 
         qzi_stddv, qw_mean, qw_stddv, qbx_mean, qbx_stddv,seed=0):
 
         variational_model_variables = dict()
@@ -219,7 +222,7 @@ class clvm:
         variational_model_variables["qzy"] = qzy
         variational_model_variables["qzi"] = qzi
 
-        return variational_model_variables
+        return (qzx, qzy, qzi), (qs, qalpha, qw, qbeta, qbx)
 
 ########################################################################
 
@@ -234,12 +237,20 @@ class clvm:
     def target(self, zx, zy, zi, s, beta, bx, w, alpha):
         return self.log_joint(zx=zx, zy=zy, zi=zi, s=self.s, x=self.target_dataset, y=self.background_dataset, beta=self.beta, bx=self.bx, w=self.w, alpha=self.alpha)
 
+    # def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
+    #             qzx_mean, qzy_mean, qzi_mean, qs_mean, qbeta_mean, qbx_mean, qw_mean, qalpha_mean,
+    #             qzx_stddv, qzy_stddv, qzi_stddv, qs_stddv, qbeta_stddv, qbx_stddv, qw_stddv, qalpha_stddv):
+    #     return self.log_q(qzx=qzx, qzy=qzy, qzi=qzi, qs=qs, qbeta=qbeta, qbx=qbx, qw=qw, qalpha=qalpha,
+    #             qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qs_mean=qs_mean, qbeta_mean=qbeta_mean, qbx_mean=qbx_mean, qw_mean=qw_mean, qalpha_mean=qalpha_mean,
+    #             qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qs_stddv=qs_stddv, qbeta_stddv=qbeta_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv, qalpha_stddv=qalpha_stddv)
+
     def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
-                qzx_mean, qzy_mean, qzi_mean, qs_mean, qbeta_mean, qbx_mean, qw_mean, qalpha_mean,
-                qzx_stddv, qzy_stddv, qzi_stddv, qs_stddv, qbeta_stddv, qbx_stddv, qw_stddv, qalpha_stddv):
+                qzx_mean, qzy_mean, qzi_mean, qbx_mean, qw_mean,
+                qzx_stddv, qzy_stddv, qzi_stddv, qbx_stddv, qw_stddv):
         return self.log_q(qzx=qzx, qzy=qzy, qzi=qzi, qs=qs, qbeta=qbeta, qbx=qbx, qw=qw, qalpha=qalpha,
-                qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qs_mean=qs_mean, qbeta_mean=qbeta_mean, qbx_mean=qbx_mean, qw_mean=qw_mean, qalpha_mean=qalpha_mean,
-                qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qs_stddv=qs_stddv, qbeta_stddv=qbeta_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv, qalpha_stddv=qalpha_stddv)
+                qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qbx_mean=qbx_mean, qw_mean=qw_mean,
+                qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv)
+
 
 ########################################################################
 
@@ -288,18 +299,26 @@ class clvm:
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        qzi_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-        qzj_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-        qti_mean = tf.Variable(np.ones([self.nx, self.k_target]), dtype=tf.float32)
-        qzi_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
-        qzj_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
-        qti_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_target]), dtype=tf.float32))
+        qzx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+        qzy_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+        qzi_mean = tf.Variable(np.ones([self.nx, self.k_target]), dtype=tf.float32)
+        qzx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
+        qzy_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
+        qzi_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_target]), dtype=tf.float32))
 
-        qzi, qzj, qti = self.variational_model(qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qzj_mean=qzj_mean,
-                                               qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
+        qw_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+        qbx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
+        qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
+        qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
 
-        energy = self.target(qzi, qzj, qti)
-        entropy = -self.target_q(qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv)
+
+        (qzx, qzy, qzi), (qs, qalpha, qw, qbeta, qbx) = self.variational_model(qzx_mean=qzx_mean, qzx_stddv=qzx_stddv, qzy_mean=qzy_mean, qzy_stddv=qzy_stddv, 
+        qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qw_mean=qw_mean, qw_stddv=qw_stddv, qbx_mean=qbx_mean, qbx_stddv=qbx_stddv)
+
+        energy = self.target(qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha)
+        entropy = -self.target_q(qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
+                qzx_mean, qzy_mean, qzi_mean, qbx_mean, qw_mean,
+                qzx_stddv, qzy_stddv, qzi_stddv, qbx_stddv, qw_stddv)
 
         elbo = energy + entropy
 
