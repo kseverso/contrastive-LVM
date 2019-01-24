@@ -223,13 +223,23 @@ class clvm:
 
 ########################################################################
 
-    def target(self, zi, zj, ti):
+    def target_old(self, zi, zj, ti):
         return self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
 
-    def target_q(self, qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
+    def target_q_old(self, qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
         return self.log_q(qzi=qzi, qzj=qzj, qti=qti, qzi_mean=qzi_mean, qzi_stddv=qzi_stddv,
                           qzj_mean=qzj_mean, qzj_stddv=qzj_stddv, 
                           qti_mean=qti_mean, qti_stddv=qti_stddv)
+    
+    def target(self, zx, zy, zi, s, beta, bx, w, alpha):
+        return self.log_joint(zx=zx, zy=zy, zi=zi, s=s, x=self.target_dataset, y=self.background_dataset, beta=beta, bx=bx, w=w, alpha=alpha)
+
+    def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
+                qzx_mean, qzy_mean, qzi_mean, qs_mean, qbeta_mean, qbx_mean, qw_mean, qalpha_mean,
+                qzx_stddv, qzy_stddv, qzi_stddv, qs_stddv, qbeta_stddv, qbx_stddv, qw_stddv, qalpha_stddv):
+        return self.log_q(qzx=qzx, qzy=qzy, qzi=qzi, qs=qs, qbeta=qbeta, qbx=qbx, qw=qw, qalpha=qalpha,
+                qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qs_mean=qs_mean, qbeta_mean=qbeta_mean, qbx_mean=qbx_mean, qw_mean=qw_mean, qalpha_mean=qalpha_mean,
+                qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qs_stddv=qs_stddv, qbeta_stddv=qbeta_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv, qalpha_stddv=qalpha_stddv)
 
     def map(self, num_epochs = 1500, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
