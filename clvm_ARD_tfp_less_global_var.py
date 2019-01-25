@@ -204,7 +204,7 @@ class clvm:
             bx = self.foo(shape=[self.Ki, self.m], name='bx_initial')
 
         #Robustness
-        s = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]), name="s")
+        s = ed.Gamma(concentration=s_concen, rate=s_rate, name="s")
         # s = ed.Gamma(tf.nn.softplus(tf.get_variable("s_shape", shape=[1])),
         #          1.0 / tf.nn.softplus(tf.get_variable("s_scale", shape=[1])),
         #          name="beta")
@@ -376,14 +376,15 @@ class clvm:
 
     def variational_inference(self, num_epochs = 1500, plot=True):
 
-        tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
-        alpha_concen=1e-3*tf.ones([self.Ks])
-        alpha_rate=1e-3*tf.ones([self.Ks])
-        beta_concen=1e-3*tf.ones([self.Ki])
-        beta_rate=1e-3*tf.ones([self.Ki])
-        s_concen=1e-3*tf.ones([1])
-        s_rate=1e-3*tf.ones([1])
+        alpha_concen=tf.nn.softplus(self.foo(name="alpha_shape", shape=[self.Ks]))
+        alpha_rate=1.0 / tf.nn.softplus(self.foo(name="alpha_scale", shape=[self.Ks]))
+        beta_concen=tf.nn.softplus(self.foo(name="beta_shape", shape=[self.Ki]))
+        beta_rate=1.0 / tf.nn.softplus(self.foo(name="beta_scale", shape=[self.Ki]))
+        s_concen=tf.nn.softplus(self.foo(name="s_shape", shape=[1]))
+        s_rate=1.0 / tf.nn.softplus(self.foo(name="s_scale", shape=[1]))
 
+        w = tf.get_variable("w_initial", shape=[self.Ks, self.m])
+        bx = tf.get_variable("bx_initial", shape=[self.Ki, self.m])
         (_x, _y), (_zx, _zy, _zi), (s, _w, alpha, _bx, beta) = self.create_model_shell(s_concen, s_rate, alpha_concen, alpha_rate, beta_concen, beta_rate)
 
         qzx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
