@@ -11,6 +11,9 @@ from tensorflow_probability import bijectors as bij
 from tensorflow_probability import edward2 as ed
 import warnings
 
+import pandas as pd
+from scipy import linalg
+from bayespy import plot as bpplt
 
 #plt.style.use("ggplot")
 warnings.filterwarnings('ignore')
@@ -85,22 +88,50 @@ def build_ARD_dataset():
 
     return A, B, labels
 
-"""
-Variable names consistent with those in
-"Unsupervised Learning with Contrastive Latent Variable Models" 
-except loading factor dimensionalities k and t --> k_shared and k_target
+def factor_plot(w, s, fp, target_fn, shared_fn,tick_label=None):
+    '''
 
-x, y = oberved data with dimensions x: d x n and y: d x m
-zi, zj = shared latent variables with dimensions: k_shared
-ti = target latent variables with dimensions: k_target
-qzi, qzj, qti = variational gaussian rep for zi, zj, ti respectively
-s = shared factor loading with dimensions: d x k_shared
-w = target factor loading with dimensions: d x k_target
-noise = noise
-"""
+    :param fn:
+    :param fp:
+    :param iter:
+    :return:
+    '''
+    print("type-w, type-s:", type(w), type(s))
+    order_w = np.argsort(np.linalg.norm(w, axis=1))
+    order_w = np.flipud(order_w)
+
+    order_s = np.argsort(np.linalg.norm(s, axis=1))
+    order_s = np.flipud(order_s)
+
+    bpplt.pyplot.figure(figsize=(10, 10))
+    bpplt.hinton(s[order_s, :].T)
+    # if tick_label.any() != None:
+    #     nd = w.shape[1]
+    #     plt.yticks(np.arange(1, nd + 1), tick_label.reshape(-1, 1))
+    plt.savefig(fp + shared_fn)
+
+    bpplt.pyplot.figure(figsize=(10, 10))
+    bpplt.hinton(w[order_w, :].T)
+    # if tick_label.any() != None:
+    #     nd = s.shape[1]
+    #     plt.yticks(np.arange(1, nd + 1), tick_label.reshape(-1, 1))
+    plt.savefig(fp + target_fn)
 
 class clvm:
-    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, TargetARD=True, BackgroundARD=True, seed=0):
+    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, TargetARD=False, BackgroundARD=True, seed=0):
+        """
+        Variable names consistent with those in
+        "Unsupervised Learning with Contrastive Latent Variable Models" 
+        except loading factor dimensionalities k and t --> k_shared and k_target
+
+        x, y = oberved data with dimensions x: d x n and y: d x m
+        zi, zj = shared latent variables with dimensions: k_shared
+        ti = target latent variables with dimensions: k_target
+        qzi, qzj, qti = variational gaussian rep for zi, zj, ti respectively
+        s = shared factor loading with dimensions: d x k_shared
+        w = target factor loading with dimensions: d x k_target
+        noise = noise
+        """
         #ideally remove defaults and make sure user always enters values
         self.m = target_dataset.shape[1]
         self.nx = target_dataset.shape[0]
@@ -109,59 +140,20 @@ class clvm:
         self.background_dataset = background_dataset
         self.TargetARD = TargetARD
         self.BackgroundARD=BackgroundARD
-        if self.BackgroundARD:
-            self.Ks = self.m-3 #latent dimensionality of shared space
-        if self.TargetARD:
-            self.Ki = self.m-1 #latent dimensionality of indepedent space
+        self.Ks = self.m-1
+        self.Ki = 2
+        # if self.BackgroundARD:
+        #     self.Ks = self.m-3 #latent dimensionality of shared space
+        # if self.TargetARD:
+        #     self.Ki = self.m-1 #latent dimensionality of indepedent space
         self.k_shared = self.Ks
         self.k_target = self.Ki
         self.log_joint = ed.make_log_joint_fn(self.create_model_shell)
         self.log_q = ed.make_log_joint_fn(self.variational_model)
-        # # robustness parameter and its correponding inference variable
-        # self.s = None
-        # # self.qs = None
-
-        # #ARD for shared space and corresponding inference variables
-        # if BackgroundARD:
-        #     self.alpha = None #vector of precision variables for w
-        #     # self.qalpha = None
-        #     # self.qw = None
-        # self.w = None #shared factor loading
-
-        # #ARD for target space and corresponding inference variables
-        # if TargetARD:
-        #     self.beta = None
-        #     # self.qbeta = None
-        #     # self.qbx = None
-        # self.bx = None
-
-        # #Robustness
-        # self.robustness = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]),name="s")
-
-        # #ARD, Shared space
-        # if self.BackgroundARD:
-        #     self.alpha = ed.Gamma(concentration=1e-3*tf.ones([self.Ks]), rate=1e-3*tf.ones([self.Ks]), name="alpha")
-        #     self.w = ed.Normal(loc=tf.zeros([self.Ks, self.m]),
-        #                     scale=tf.einsum('i,j->ij', tf.reciprocal(self.alpha), tf.ones([self.m])), name='w')
-        # else:
-        #     self.alpha=None
-        #     self.w = tf.get_variable("W", shape=[self.Ks, self.m])
-
-
-        # #ARD, Target space
-        # if self.TargetARD:
-        #     self.beta = ed.Gamma(concentration=1e-3*tf.ones([self.Ki]), rate=1e-3*tf.ones([self.Ki]),name="beta")
-        #     self.bx = ed.Normal(loc=tf.zeros([self.Ki, self.m]),
-        #                  scale=tf.einsum('i,j->ij', tf.reciprocal(self.beta), tf.ones([self.m])), name='bx')
-        # else:
-        #     self.beta=None
-        #     self.bx = tf.get_variable(shape=[self.Ki, self.m], name='Bx')
-
-
 
     def lognormal_q(self, shape, name=None):
         with tf.variable_scope(name, default_name="lognormal_q"):
-            rv = ed.Gamma(tf.nn.softplus(tf.get_variable("shape", shape)),1.0 / tf.nn.softplus(tf.get_variable("scale", shape)),name=name)
+            rv = ed.Gamma(tf.nn.softplus(self.foo(name=name+"shape", shape=shape)),1.0 / tf.nn.softplus(self.foo(name=name+"scale", shape=shape)),name=name)
             return rv
             min_scale = 1e-5
             loc = tf.get_variable("loc", shape)
@@ -184,8 +176,7 @@ class clvm:
             # alpha = ed.Gamma(tf.nn.softplus(tf.get_variable("alpha_shape", shape=[self.Ks])),
             #      1.0 / tf.nn.softplus(tf.get_variable("alpha_scale", shape=[self.Ks])),
             #      name="alpha")
-            w = ed.Normal(loc=tf.zeros([self.Ks, self.m]),
-                            scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.m])), name='w')
+            w = ed.Normal(loc=tf.zeros([self.Ks, self.m]), scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.m])), name='w')
         else:
             alpha=None
             w = self.foo(name="w_initial", shape=[self.Ks, self.m])
@@ -205,31 +196,6 @@ class clvm:
 
         #Robustness
         s = ed.Gamma(concentration=s_concen, rate=s_rate, name="s")
-        # s = ed.Gamma(tf.nn.softplus(tf.get_variable("s_shape", shape=[1])),
-        #          1.0 / tf.nn.softplus(tf.get_variable("s_scale", shape=[1])),
-        #          name="beta")
-
-        # #Robustness
-        # s = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]),name="s")
-
-        # #ARD, Shared space
-        # if self.BackgroundARD:
-        #     alpha = ed.Gamma(concentration=1e-3*tf.ones([self.Ks]), rate=1e-3*tf.ones([self.Ks]), name="alpha")
-        #     w = ed.Normal(loc=tf.zeros([self.Ks, self.m]),
-        #                     scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.m])), name='w')
-        # else:
-        #     alpha=None
-        #     w = tf.get_variable(shape=[self.Ks, self.m], name='W')
-
-
-        # #ARD, Target space
-        # if self.TargetARD:
-        #     beta = ed.Gamma(concentration=1e-3*tf.ones([self.Ki]), rate=1e-3*tf.ones([self.Ki]),name="beta")
-        #     bx = ed.Normal(loc=tf.zeros([self.Ki, self.m]),
-        #                  scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.m])), name='bx')
-        # else:
-        #     beta=None
-        #     bx = tf.get_variable(shape=[self.Ki, self.m], name='Bx')
 
         #Latent vectors
         zx = ed.Normal(loc=tf.zeros([self.nx, self.Ks]), scale=tf.ones([self.nx, self.Ks]), name='zx')
@@ -319,7 +285,7 @@ class clvm:
 
 ########################################################################
 
-    def map(self, num_epochs = 1500, plot=True):
+    def map(self, num_epochs = 13000, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
         zx = self.foo(name="zx_initial", shape=[self.ny, self.k_shared])
@@ -339,7 +305,7 @@ class clvm:
 
         energy = -self.target(zx, zy, zi, s, beta, bx, w, alpha, s_concen, s_rate, alpha_concen, alpha_rate, beta_concen, beta_rate)
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
+        optimizer = tf.train.AdamOptimizer(learning_rate=0.04)
         train = optimizer.minimize(energy)
 
         init = tf.global_variables_initializer()
@@ -356,8 +322,15 @@ class clvm:
                     learning_curve.append(cE)
 
             t_inferred_map = sess.run(zi)
-        print("learning curve", learning_curve)
-        print("energy", energy_eval)
+            bx_post = sess.run(bx) #would need to make this a global variable??
+            w_post = sess.run(w)
+        # print("learning curve", learning_curve)
+        # print("energy", energy_eval)
+        factor_plot(bx_post,w_post,"/Users/prachi.sinha@ibm.com/Desktop/contrastive-LVM/", "map-target_dim_m-1.png", "map-shared_dim_m-3.png")
+        if (plot):
+            plt.figure()
+            plt.plot(range(1, num_epochs, 5), learning_curve)
+            plt.title("Learning Curve MAP")
 
         if (plot):
             print('MAP ti shape:', t_inferred_map.shape)
@@ -372,10 +345,11 @@ class clvm:
             plt.title("Target Latent Space MAP")
             plt.show()
 
+
         return t_inferred_map
 
-    def variational_inference(self, num_epochs = 1500, plot=True):
-
+    def variational_inference(self, num_epochs = 5000, plot=True):
+        tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
         alpha_concen=tf.nn.softplus(self.foo(name="alpha_shape", shape=[self.Ks]))
         alpha_rate=1.0 / tf.nn.softplus(self.foo(name="alpha_scale", shape=[self.Ks]))
         beta_concen=tf.nn.softplus(self.foo(name="beta_shape", shape=[self.Ki]))
@@ -397,8 +371,8 @@ class clvm:
         qs_shape = s.shape
         
         if self.BackgroundARD:
-            qw_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-            qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.ny, self.k_shared]), dtype=tf.float32))
+            qw_mean = tf.Variable(np.ones([self.Ks, self.m]), dtype=tf.float32)
+            qw_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.Ks, self.m]), dtype=tf.float32))
             qalpha_shape = alpha.shape
         else:
             qw_mean = None
@@ -406,8 +380,8 @@ class clvm:
             qalpha_shape = None
 
         if self.TargetARD:
-            qbx_mean = tf.Variable(np.ones([self.ny, self.k_shared]), dtype=tf.float32)
-            qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.nx, self.k_shared]), dtype=tf.float32))
+            qbx_mean = tf.Variable(np.ones([self.Ki, self.m]), dtype=tf.float32)
+            qbx_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.Ki, self.m]), dtype=tf.float32))
             qbeta_shape = beta.shape
         else:
             qbx_mean = None
@@ -444,14 +418,14 @@ class clvm:
                     learning_curve.append(sess.run([elbo]))
 
             ti_inferred = sess.run(qzi_mean)
-            # if self.TargetARD:
-            #     bx_post = sess.run(qbx) #would need to make this a global variable??
-            # else:
-            #     bx_post = bx.eval()
-            # if self.BackgroundARD:
-            #     w_post = sess.run(qw) #would need to make this a global variable??
-            # else:
-            #     w_post = w.eval()
+            if self.TargetARD:
+                bx_post = sess.run(qbx) #would need to make this a global variable??
+            else:
+                bx_post = bx.eval()
+            if self.BackgroundARD:
+                w_post = sess.run(qw) #would need to make this a global variable??
+            else:
+                w_post = w.eval()
 
         print("elbo", elbo_eval)
 
@@ -472,6 +446,8 @@ class clvm:
             plt.title("Target Latent Space VI")
 
             plt.show()
+
+            factor_plot(bx_post,w_post,"/Users/prachi.sinha@ibm.com/Desktop/contrastive-LVM/", "target_dim_m-1.png", "shared_dim_m-3.png")
 
 
         return ti_inferred
