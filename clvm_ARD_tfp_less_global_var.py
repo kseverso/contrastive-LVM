@@ -252,26 +252,9 @@ class clvm:
 
 ########################################################################
 
-    def target_old(self, zi, zj, ti):
-        return self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
-
-    def target_q_old(self, qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
-        return self.log_q(qzi=qzi, qzj=qzj, qti=qti, qzi_mean=qzi_mean, qzi_stddv=qzi_stddv,
-                          qzj_mean=qzj_mean, qzj_stddv=qzj_stddv, 
-                          qti_mean=qti_mean, qti_stddv=qti_stddv)
-    
-    # will target and target_q ignore None variables?
-
     def target(self, zx, zy, zi, s, beta, bx, w, alpha, s_concen, s_rate, alpha_concen, alpha_rate, beta_concen, beta_rate):
         return self.log_joint(zx=zx, zy=zy, zi=zi, w=w, s=s, x=self.target_dataset, y=self.background_dataset, beta=beta, bx=bx, alpha=alpha,
         s_concen=s_concen, s_rate=s_rate, alpha_concen=alpha_concen, alpha_rate=alpha_rate, beta_concen=beta_concen, beta_rate=beta_rate)
-
-    # def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
-    #             qzx_mean, qzy_mean, qzi_mean, qs_mean, qbeta_mean, qbx_mean, qw_mean, qalpha_mean,
-    #             qzx_stddv, qzy_stddv, qzi_stddv, qs_stddv, qbeta_stddv, qbx_stddv, qw_stddv, qalpha_stddv):
-    #     return self.log_q(qzx=qzx, qzy=qzy, qzi=qzi, qs=qs, qbeta=qbeta, qbx=qbx, qw=qw, qalpha=qalpha,
-    #             qzx_mean=qzx_mean, qzy_mean=qzy_mean, qzi_mean=qzi_mean, qs_mean=qs_mean, qbeta_mean=qbeta_mean, qbx_mean=qbx_mean, qw_mean=qw_mean, qalpha_mean=qalpha_mean,
-    #             qzx_stddv=qzx_stddv, qzy_stddv=qzy_stddv, qzi_stddv=qzi_stddv, qs_stddv=qs_stddv, qbeta_stddv=qbeta_stddv, qbx_stddv=qbx_stddv, qw_stddv=qw_stddv, qalpha_stddv=qalpha_stddv)
 
     def target_q(self, qzx, qzy, qzi, qs, qbeta, qbx, qw, qalpha,
                 qzx_mean, qzy_mean, qzi_mean, qbx_mean, qw_mean,
@@ -322,10 +305,8 @@ class clvm:
                     learning_curve.append(cE)
 
             t_inferred_map = sess.run(zi)
-            bx_post = sess.run(bx) #would need to make this a global variable??
+            bx_post = sess.run(bx) 
             w_post = sess.run(w)
-        # print("learning curve", learning_curve)
-        # print("energy", energy_eval)
         factor_plot(bx_post,w_post,"/Users/prachi.sinha@ibm.com/Desktop/contrastive-LVM/", "map-target_dim_m-1.png", "map-shared_dim_m-3.png")
         if (plot):
             plt.figure()
@@ -419,11 +400,11 @@ class clvm:
 
             ti_inferred = sess.run(qzi_mean)
             if self.TargetARD:
-                bx_post = sess.run(qbx) #would need to make this a global variable??
+                bx_post = sess.run(qbx) 
             else:
                 bx_post = bx.eval()
             if self.BackgroundARD:
-                w_post = sess.run(qw) #would need to make this a global variable??
+                w_post = sess.run(qw) 
             else:
                 w_post = w.eval()
 
