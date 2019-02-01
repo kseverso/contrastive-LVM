@@ -119,19 +119,7 @@ def factor_plot(w, s, fp, target_fn, shared_fn,tick_label=None):
 
 class clvm:
     def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, TargetARD=False, BackgroundARD=True, seed=0):
-        """
-        Variable names consistent with those in
-        "Unsupervised Learning with Contrastive Latent Variable Models" 
-        except loading factor dimensionalities k and t --> k_shared and k_target
 
-        x, y = oberved data with dimensions x: d x n and y: d x m
-        zi, zj = shared latent variables with dimensions: k_shared
-        ti = target latent variables with dimensions: k_target
-        qzi, qzj, qti = variational gaussian rep for zi, zj, ti respectively
-        s = shared factor loading with dimensions: d x k_shared
-        w = target factor loading with dimensions: d x k_target
-        noise = noise
-        """
         #ideally remove defaults and make sure user always enters values
         self.m = target_dataset.shape[1]
         self.nx = target_dataset.shape[0]
@@ -153,7 +141,7 @@ class clvm:
 
     def lognormal_q(self, shape, name=None):
         with tf.variable_scope(name, default_name="lognormal_q"):
-            rv = ed.Gamma(tf.nn.softplus(self.foo(name=name+"shape", shape=shape)),1.0 / tf.nn.softplus(self.foo(name=name+"scale", shape=shape)),name=name)
+            rv = ed.Gamma(tf.nn.softplus(self.get_variable_wrapper(name=name+"shape", shape=shape)),1.0 / tf.nn.softplus(self.get_variable_wrapper(name=name+"scale", shape=shape)),name=name)
             return rv
             min_scale = 1e-5
             loc = tf.get_variable("loc", shape)
@@ -162,7 +150,7 @@ class clvm:
             rv = ed.TransformedDistribution(distribution,bijector=bij.Exp(), name="rv")
             return rv
 
-    def foo(self, shape, name):
+    def get_variable_wrapper(self, shape, name):
         with tf.variable_scope("foo", reuse=tf.AUTO_REUSE):
             v = tf.get_variable(name, shape)
         return v
@@ -179,7 +167,7 @@ class clvm:
             w = ed.Normal(loc=tf.zeros([self.Ks, self.m]), scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.m])), name='w')
         else:
             alpha=None
-            w = self.foo(name="w_initial", shape=[self.Ks, self.m])
+            w = self.get_variable_wrapper(name="w_initial", shape=[self.Ks, self.m])
 
 
         #ARD, Target space
@@ -192,7 +180,7 @@ class clvm:
                          scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.m])), name="bx")
         else:
             beta=None
-            bx = self.foo(shape=[self.Ki, self.m], name='bx_initial')
+            bx = self.get_variable_wrapper(shape=[self.Ki, self.m], name='bx_initial')
 
         #Robustness
         s = ed.Gamma(concentration=s_concen, rate=s_rate, name="s")
@@ -271,16 +259,16 @@ class clvm:
     def map(self, num_epochs = 13000, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        zx = self.foo(name="zx_initial", shape=[self.ny, self.k_shared])
-        zy= self.foo(name="zy_initial", shape=[self.ny, self.k_shared])
-        zi = self.foo(name="zi_initial", shape=[self.ny, self.k_target])
+        zx = self.get_variable_wrapper(name="zx_initial", shape=[self.ny, self.k_shared])
+        zy= self.get_variable_wrapper(name="zy_initial", shape=[self.ny, self.k_shared])
+        zi = self.get_variable_wrapper(name="zi_initial", shape=[self.ny, self.k_target])
 
-        alpha_concen=tf.nn.softplus(self.foo(name="alpha_shape", shape=[self.Ks]))
-        alpha_rate=1.0 / tf.nn.softplus(self.foo(name="alpha_scale", shape=[self.Ks]))
-        beta_concen=tf.nn.softplus(self.foo(name="beta_shape", shape=[self.Ki]))
-        beta_rate=1.0 / tf.nn.softplus(self.foo(name="beta_scale", shape=[self.Ki]))
-        s_concen=tf.nn.softplus(self.foo(name="s_shape", shape=[1]))
-        s_rate=1.0 / tf.nn.softplus(self.foo(name="s_scale", shape=[1]))
+        alpha_concen=tf.nn.softplus(self.get_variable_wrapper(name="alpha_shape", shape=[self.Ks]))
+        alpha_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="alpha_scale", shape=[self.Ks]))
+        beta_concen=tf.nn.softplus(self.get_variable_wrapper(name="beta_shape", shape=[self.Ki]))
+        beta_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="beta_scale", shape=[self.Ki]))
+        s_concen=tf.nn.softplus(self.get_variable_wrapper(name="s_shape", shape=[1]))
+        s_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="s_scale", shape=[1]))
 
         w = tf.get_variable("w_initial", shape=[self.Ks, self.m])
         bx = tf.get_variable("bx_initial", shape=[self.Ki, self.m])
@@ -331,12 +319,12 @@ class clvm:
 
     def variational_inference(self, num_epochs = 5000, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
-        alpha_concen=tf.nn.softplus(self.foo(name="alpha_shape", shape=[self.Ks]))
-        alpha_rate=1.0 / tf.nn.softplus(self.foo(name="alpha_scale", shape=[self.Ks]))
-        beta_concen=tf.nn.softplus(self.foo(name="beta_shape", shape=[self.Ki]))
-        beta_rate=1.0 / tf.nn.softplus(self.foo(name="beta_scale", shape=[self.Ki]))
-        s_concen=tf.nn.softplus(self.foo(name="s_shape", shape=[1]))
-        s_rate=1.0 / tf.nn.softplus(self.foo(name="s_scale", shape=[1]))
+        alpha_concen=tf.nn.softplus(self.get_variable_wrapper(name="alpha_shape", shape=[self.Ks]))
+        alpha_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="alpha_scale", shape=[self.Ks]))
+        beta_concen=tf.nn.softplus(self.get_variable_wrapper(name="beta_shape", shape=[self.Ki]))
+        beta_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="beta_scale", shape=[self.Ki]))
+        s_concen=tf.nn.softplus(self.get_variable_wrapper(name="s_shape", shape=[1]))
+        s_rate=1.0 / tf.nn.softplus(self.get_variable_wrapper(name="s_scale", shape=[1]))
 
         w = tf.get_variable("w_initial", shape=[self.Ks, self.m])
         bx = tf.get_variable("bx_initial", shape=[self.Ki, self.m])
