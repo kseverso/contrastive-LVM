@@ -68,7 +68,7 @@ noise = noise
 """
 
 class clvm:
-    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2):
+    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, robust_flag=False):
 
         self.n, self.d = target_dataset.shape
         self.m = background_dataset.shape[0]
@@ -77,18 +77,50 @@ class clvm:
         self.k_shared = k_shared
         self.k_target = k_target
 
-        self.log_joint = ed.make_log_joint_fn(self.clvm_data)
+        #flags for model variants
+        self.robust = robust_flag
+
+        self.log_joint = ed.make_log_joint_fn(self.clvm_model)
         self.log_q = ed.make_log_joint_fn(self.variational_model)
 
-    def clvm_data(self):  # (unmodeled) data
-        # Parameters
-        # shared factor loading
-        s = tf.get_variable("s", shape = [self.k_shared, self.d])
-        # target factor loading
-        w = tf.get_variable("w", shape=[self.k_target, self.d])
-        # noise
-        noise = tf.get_variable("noise", initializer=tf.ones([1], dtype=tf.float32))
+    def get_parameter(self, shape, name, pos_flag=False):
+        if pos_flag:
+            v = tf.nn.softplus(tf.get_variable(name=name, shape=shape))
+        else:
+            v = tf.get_variable(name=name, shape=shape)
+        return v
 
+    def trainable_lognormal(self, shape, name=None):
+        with tf.variable_scope(name, default_name="lognormal"):
+            min_scale = 1e-5
+            loc = tf.get_variable("loc", shape)
+            scale = tf.get_variable(
+                "scale", shape, initializer=tf.random_normal_initializer(stddev=0.1))
+            rv = ed.TransformedDistribution(
+                distribution=ed.Normal(loc, tf.maximum(tf.nn.softplus(scale), min_scale)),
+                bijector=tfp.bijectors.Exp(), name=name)
+            return rv
+
+    def trainable_gamma(self, shape, name=None):
+        """Learnable Gamma via shape and scale parameterization."""
+        with tf.variable_scope(None, default_name="trainable_gamma"):
+            return ed.Gamma(tf.nn.softplus(tf.get_variable("shape", shape)),
+                            1.0 / tf.nn.softplus(tf.get_variable("scale", shape)),
+                            name=name)
+
+    def make_value_setter(self, **model_kwargs):
+        """Creates a value-setting interceptor."""
+
+        def set_values(f, *args, **kwargs):
+            """Sets random variable values to its aligned value."""
+            name = kwargs.get("name")
+            if name in model_kwargs:
+                kwargs["value"] = model_kwargs[name]
+            return ed.interceptable(f)(*args, **kwargs)
+
+        return set_values
+
+    def clvm_model(self):  # (unmodeled) data
         # note: using initializer=tf.ones([self.k_shared, self.d], dtype=tf.float32)) caused issues
 
         # Latent vectors
@@ -96,27 +128,79 @@ class clvm:
         zj = ed.Normal(loc=tf.zeros([self.m, self.k_shared]), scale=tf.ones([self.m, self.k_shared]), name='zj')
         ti = ed.Normal(loc=tf.zeros([self.n, self.k_target]), scale=tf.ones([self.n, self.k_target]), name='ti')
 
+        latent_vars = (zi, zj, ti)
+
+        # Parameters
+        # shared factor loading
+        s = self.get_parameter([self.k_shared, self.d], "s")
+        # target factor loading
+        w = self.get_parameter([self.k_target, self.d], "w")
+        # noise
+        if self.robust:
+            noise = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]), name='noise')
+            latent_vars = latent_vars + (noise,)
+        else:
+            noise = self.get_parameter([1], "noise", True)
+
         # Observed vectors
         x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
-                           scale=noise * tf.ones([self.n, self.d]), name="x")
+                      scale=noise * tf.ones([self.n, self.d]), name="x")
         y = ed.Normal(loc=tf.matmul(zj, s),
-                           scale=noise * tf.ones([self.m, self.d]), name="y")
+                      scale=noise * tf.ones([self.m, self.d]), name="y")
 
-        return (x, y), (zi, zj, ti)
+        return (x, y), latent_vars
 
-    def variational_model(self, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
+    def variational_model(self, params):
+        '''
+
+        :param params: dictionary of the variational parameters (typically called lambda) that minimize the KL
+        divergence between q and the posterior
+        :return:
+        '''
+        qzi_mean = params['qzi_mean']
+        qzi_stddv = params['qzi_stddv']
+        qzj_mean = params['qzj_mean']
+        qzj_stddv = params['qzj_stddv']
+        qti_mean = params['qti_mean']
+        qti_stddv = params['qti_stddv']
+
         qzi = ed.Normal(loc=qzi_mean, scale=qzi_stddv, name="qzi")
         qzj = ed.Normal(loc=qzj_mean, scale=qzj_stddv, name="qzj")
         qti = ed.Normal(loc=qti_mean, scale=qti_stddv, name="qti")
 
-        return qzi, qzj, qti
+        q_latent_vars = (qzi, qzj, qti)
 
-    def target(self, zi, zj, ti):
-        return self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
+        if self.robust:
+            #qnoise = self.trainable_lognormal(tf.ones([1]), "qnoise")
+            qnoise_conc = params['qnoise_conc']
+            qnoise_rate = params['qnoise_rate']
+            #qnoise = ed.Gamma(concentration=qnoise_conc, rate=qnoise_rate, name="qnoise")
+            qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_conc, scale=qnoise_rate))
+            q_latent_vars = q_latent_vars + (qnoise, )
 
-    def target_q(self, qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv):
-        return self.log_q(qzi=qzi, qzj=qzj, qti=qti, qzi_mean=qzi_mean, qzi_stddv=qzi_stddv,
-                          qzj_mean=qzj_mean, qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
+        return q_latent_vars
+
+    def target(self, target_vars):
+        zi = target_vars['zi']
+        zj = target_vars['zj']
+        ti = target_vars['ti']
+        if self.robust:
+            noise = target_vars['noise']
+            lj = self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, x=self.target_dataset, y=self.background_dataset)
+        else:
+            lj = self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
+        return lj
+
+    def target_q(self, target_vars, params):
+        qzi = target_vars['zi']
+        qzj = target_vars['zj']
+        qti = target_vars['ti']
+        if self.robust:
+            qnoise = target_vars['noise']
+            ljq = self.log_q(params, qzi=qzi, qzj=qzj, qti=qti, qnoise=qnoise)
+        else:
+            ljq = self.log_q(params, qzi=qzi, qzj=qzj, qti=qti)
+        return ljq
 
     def map(self, num_epochs = 1500, plot=True):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
@@ -125,7 +209,12 @@ class clvm:
         zj = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
         ti = tf.Variable(np.ones([self.n, self.k_target]), dtype=tf.float32)
 
-        energy = -self.target(zi, zj, ti)
+        target_vars = {'zi': zi, 'zj': zj, 'ti': ti}
+
+        if self.robust:
+            target_vars['noise'] = tf.Variable(tf.ones([1]), dtype=tf.float32)
+
+        energy = -self.target(target_vars)
 
         optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
         train = optimizer.minimize(energy)
@@ -159,7 +248,7 @@ class clvm:
 
         return t_inferred_map
 
-    def variational_inference(self, num_epochs = 1500, plot=True):
+    def variational_inference(self, num_epochs=2500, plot=True):
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
@@ -170,11 +259,22 @@ class clvm:
         qzj_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.m, self.k_shared]), dtype=tf.float32))
         qti_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.n, self.k_target]), dtype=tf.float32))
 
-        qzi, qzj, qti = self.variational_model(qzi_mean=qzi_mean, qzi_stddv=qzi_stddv, qzj_mean=qzj_mean,
-                                               qzj_stddv=qzj_stddv, qti_mean=qti_mean, qti_stddv=qti_stddv)
+        params = {'qzi_mean': qzi_mean, 'qzi_stddv': qzi_stddv, 'qti_mean': qti_mean, 'qti_stddv': qti_stddv,
+                  'qzj_mean': qzj_mean, 'qzj_stddv': qzj_stddv}
 
-        energy = self.target(qzi, qzj, qti)
-        entropy = -self.target_q(qzi, qzj, qti, qzi_mean, qzi_stddv, qzj_mean, qzj_stddv, qti_mean, qti_stddv)
+        if self.robust:
+            params['qnoise_conc'] = tf.Variable(1e-2*tf.ones([1]), dtype=tf.float32)
+            params['qnoise_rate'] = tf.nn.softplus(1e-2*tf.Variable(np.ones([1]), dtype=tf.float32))
+
+        if self.robust:
+            qzi, qzj, qti, qnoise = self.variational_model(params)
+            qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti, 'noise': qnoise}
+        else:
+            qzi, qzj, qti = self.variational_model(params)
+            qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti}
+
+        energy = self.target(qtarget_vars)
+        entropy = -self.target_q(qtarget_vars, params)
 
         elbo = energy + entropy
 
@@ -229,7 +329,7 @@ if __name__ == '__main__':
     print('shape of target data:', x_train.shape)
     print('shape of background data:', y_train.shape)
 
-    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target))
+    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=True)
     model.map(plot=args.plot)
     model.variational_inference(plot=args.plot)
 

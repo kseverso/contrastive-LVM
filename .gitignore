@@ -102,3 +102,12 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+
+# results folder
+/results/
+
+.DS_Store
+
+#emacs temp
+*~
