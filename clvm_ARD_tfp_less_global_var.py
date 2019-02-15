@@ -295,7 +295,7 @@ class clvm:
             t_inferred_map = sess.run(zi)
             bx_post = sess.run(bx) 
             w_post = sess.run(w)
-        factor_plot(bx_post,w_post,"/Users/prachi.sinha@ibm.com/Desktop/contrastive-LVM/", "map-target_dim_m-1.png", "map-shared_dim_m-3.png")
+        factor_plot(bx_post,w_post, './results/', 'ARDtest_target', 'ARDtest_shared')
         if (plot):
             plt.figure()
             plt.plot(range(1, num_epochs, 5), learning_curve)

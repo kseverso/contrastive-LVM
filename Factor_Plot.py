@@ -8,18 +8,15 @@ import matplotlib
 from scipy import linalg
 import bayespy.plot as bpplt
 
-def factor_plot(fn, fp, tick_label=None):
+def factor_plot(w, s, fp, tick_label=None):
     '''
 
-    :param fn:
+    :param w:
+    :param s:
     :param fp:
     :param iter:
     :return:
     '''
-
-    model = joblib.load(fn)
-    w = model['W']
-    s = model['S']
 
     order_w = np.argsort(np.linalg.norm(w, axis=1))
     order_w = np.flipud(order_w)
