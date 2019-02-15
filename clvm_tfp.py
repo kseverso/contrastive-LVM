@@ -323,13 +323,14 @@ if __name__ == '__main__':
     parser.add_argument("--k_shared", default=10)
     parser.add_argument("--k_target", default=2)
     parser.add_argument("--plot", default=True)
+    parser.add_argument("--robust", default=False)
     args = parser.parse_args()
 
     x_train, y_train, labels = build_toy_dataset()
     print('shape of target data:', x_train.shape)
     print('shape of background data:', y_train.shape)
 
-    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=True)
+    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust)
     model.map(plot=args.plot)
     model.variational_inference(plot=args.plot)
 
