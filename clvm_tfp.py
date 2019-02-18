@@ -171,11 +171,9 @@ class clvm:
         q_latent_vars = (qzi, qzj, qti)
 
         if self.robust:
-            #qnoise = self.trainable_lognormal(tf.ones([1]), "qnoise")
-            qnoise_conc = params['qnoise_conc']
-            qnoise_rate = params['qnoise_rate']
-            #qnoise = ed.Gamma(concentration=qnoise_conc, rate=qnoise_rate, name="qnoise")
-            qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_conc, scale=qnoise_rate))
+            qnoise_loc = params['qnoise_conc']
+            qnoise_scale = params['qnoise_rate']
+            qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_loc, scale=qnoise_scale))
             q_latent_vars = q_latent_vars + (qnoise, )
 
         return q_latent_vars
