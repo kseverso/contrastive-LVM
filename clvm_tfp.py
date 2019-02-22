@@ -5,13 +5,15 @@ import numpy as np
 import seaborn as sns
 import argparse
 
+from bayespy import plot as bpplt
+
 import tensorflow as tf
 import tensorflow_probability as tfp
 from tensorflow_probability import edward2 as ed
 import warnings
 
+from sklearn.externals import joblib
 
-#plt.style.use("ggplot")
 warnings.filterwarnings('ignore')
 
 
@@ -53,6 +55,32 @@ def build_toy_dataset():
 
     return A, B, labels
 
+
+def factor_plot(w, a, fp, fn, tick_label=None):
+    '''
+
+    :param fn:
+    :param fp:
+    :param iter:
+    :return:
+    '''
+    order_w = np.argsort(np.linalg.norm(w, axis=1))
+    order_w = np.flipud(order_w)
+
+
+    bpplt.pyplot.figure(figsize=(10, 10))
+    bpplt.hinton(w[order_w, :].T)
+    #bpplt.hinton(w)
+    # if tick_label.any() != None:
+    #     nd = s.shape[1]
+    #     plt.yticks(np.arange(1, nd + 1), tick_label.reshape(-1, 1))
+    plt.savefig(fp + fn)
+
+    fig, ax = plt.subplots(1,1,dpi=300)
+    ax.plot(1/(a[order_w]), 'o')
+    fig.tight_layout()
+    fig.savefig(fp + 'alpha' + fn)
+
 """
 Variable names consistent with those in
 "Unsupervised Learning with Contrastive Latent Variable Models" 
@@ -68,7 +96,8 @@ noise = noise
 """
 
 class clvm:
-    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, robust_flag=False):
+    def __init__(self, target_dataset, background_dataset, k_shared=10, k_target=2, robust_flag=False, sharedARD=False,
+                 targetARD=False, target_missing=False, background_missing=False):
 
         self.n, self.d = target_dataset.shape
         self.m = background_dataset.shape[0]
@@ -79,6 +108,17 @@ class clvm:
 
         #flags for model variants
         self.robust = robust_flag
+        self.targetARD = targetARD
+        self.sharedARD = sharedARD
+        self.target_missing = target_missing
+        self.backgound_missing = background_missing
+
+        if self.target_missing:
+            self.ix_obs = ~np.isnan(self.target_dataset)
+            self.ix_mis = np.isnan(self.target_dataset)
+        if self.backgound_missing:
+            self.iy_obs = ~np.isnan(self.background_dataset)
+            self.iy_mis = np.isnan(self.background_dataset)
 
         self.log_joint = ed.make_log_joint_fn(self.clvm_model)
         self.log_q = ed.make_log_joint_fn(self.variational_model)
@@ -132,21 +172,51 @@ class clvm:
 
         # Parameters
         # shared factor loading
-        s = self.get_parameter([self.k_shared, self.d], "s")
+        if self.sharedARD:
+            alpha = ed.Gamma(concentration=1e-3*tf.ones([self.k_shared]),
+                             rate=1e-3*tf.ones([self.k_shared]), name="alpha")
+            s = ed.Normal(loc=tf.zeros([self.k_shared, self.d]),
+                          scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.d])), name="s")
+            latent_vars = latent_vars + (alpha, s,)
+        else:
+            s = self.get_parameter([self.k_shared, self.d], "s")
+
         # target factor loading
-        w = self.get_parameter([self.k_target, self.d], "w")
+        if self.targetARD:
+            beta = ed.Gamma(concentration=1e-3*tf.ones([self.k_target]),
+                            rate=1e-3*tf.ones([self.k_target]), name="beta")
+            w = ed.Normal(loc=tf.zeros([self.k_target, self.d]),
+                          scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.d])), name="w")
+            latent_vars = latent_vars + (beta, w,)
+        else:
+            w = self.get_parameter([self.k_target, self.d], "w")
+
         # noise
         if self.robust:
-            noise = ed.Gamma(concentration=1e-3*tf.ones([1]), rate=1e-3*tf.ones([1]), name='noise')
+            noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
             latent_vars = latent_vars + (noise,)
         else:
             noise = self.get_parameter([1], "noise", True)
 
         # Observed vectors
-        x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
-                      scale=noise * tf.ones([self.n, self.d]), name="x")
-        y = ed.Normal(loc=tf.matmul(zj, s),
-                      scale=noise * tf.ones([self.m, self.d]), name="y")
+        if self.target_missing:
+            x = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), self.ix_obs),
+                          scale=tf.gather_nd(noise*tf.ones([self.n, self.d]), self.ix_obs))
+            x_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(self.zi, s) + tf.matmul(self.ti, w), self.ix_mis),
+                              scale=tf.gather_nd(noise*tf.ones([self.n, self.d], self.ix_mis)))
+            latent_vars = latent_vars + (x_mis, )
+        else:
+            x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
+                        scale=noise * tf.ones([self.n, self.d]), name="x")
+        if self.backgound_missing:
+            y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), self.iy_obs),
+                          scale=tf.gather_nd(noise*tf.ones([self.m, self.d], self.iy_obs)))
+            y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), self.iy_mis),
+                              scale=tf.gather_nd(noise*tf.ones([self.m, self.d], self.iy_mis)))
+            latent_vars = latent_vars + (y_mis, )
+        else:
+            y = ed.Normal(loc=tf.matmul(zj, s),
+                          scale=noise * tf.ones([self.m, self.d]), name="y")
 
         return (x, y), latent_vars
 
@@ -169,48 +239,145 @@ class clvm:
         qti = ed.Normal(loc=qti_mean, scale=qti_stddv, name="qti")
 
         q_latent_vars = (qzi, qzj, qti)
+        q_latent_vars_names = ['zi', 'zj', 'ti']
 
         if self.robust:
             qnoise_loc = params['qnoise_conc']
             qnoise_scale = params['qnoise_rate']
             qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_loc, scale=qnoise_scale))
             q_latent_vars = q_latent_vars + (qnoise, )
+            q_latent_vars_names.append('noise')
 
-        return q_latent_vars
+        if self.sharedARD:
+            qalpha_loc = params['qalpha_loc']
+            qalpha_scale = params['qalpha_scale']
+            qalpha = ed.RandomVariable(tfp.distributions.LogNormal(loc=qalpha_loc, scale=qalpha_scale))
+
+            qs_loc = params['qs_loc']
+            qs_scale = params['qs_scale']
+            qs = ed.Normal(loc=qs_loc, scale=qs_scale, name="qs")
+            q_latent_vars = q_latent_vars + (qs, qalpha, )
+            q_latent_vars_names.append('s')
+            q_latent_vars_names.append('alpha')
+
+        if self.targetARD:
+            qbeta_loc = params['qbeta_loc']
+            qbeta_scale = params['qbeta_scale']
+            qbeta = ed.RandomVariable(tfp.distributions.LogNormal(loc=qbeta_loc, scale=qbeta_scale))
+
+            qw_loc = params['qw_loc']
+            qw_scale = params['qw_scale']
+            qw = ed.Normal(loc=qw_loc, scale=qw_scale, name="qw")
+            q_latent_vars = q_latent_vars + (qw, qbeta, )
+            q_latent_vars_names.append('w')
+            q_latent_vars_names.append('beta')
+
+        if self.target_missing:
+            qtarget_loc = params['qtarget_loc']
+            qtarget_scale = params['qtarget_scale']
+            qx = ed.Normal(loc=qtarget_loc, scale=qtarget_scale, name="qx")
+            q_latent_vars = q_latent_vars + (qx, )
+            q_latent_vars_names.append('qx')
+
+        if self.backgound_missing:
+            qbackground_loc = params['qbackground_loc']
+            qbackground_scale = params['qbackground_scale']
+            qy = ed.Normal(loc=qbackground_loc, scale=qbackground_scale, name="qy")
+            q_latent_vars = q_latent_vars + (qy, )
+            q_latent_vars_names.append('qy')
+
+        return q_latent_vars, q_latent_vars_names
 
     def target(self, target_vars):
         zi = target_vars['zi']
         zj = target_vars['zj']
         ti = target_vars['ti']
+
+        noise = []
+        s = []
+        alpha = []
+        w = []
+        beta = []
+        x_mis = []
+        y_mis = []
+
         if self.robust:
             noise = target_vars['noise']
-            lj = self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, x=self.target_dataset, y=self.background_dataset)
-        else:
-            lj = self.log_joint(zi=zi, zj=zj, ti=ti, x=self.target_dataset, y=self.background_dataset)
-        return lj
+
+        if self.sharedARD:
+            s = target_vars['s']
+            alpha = target_vars['alpha']
+
+        if self.targetARD:
+            w = target_vars['w']
+            beta = target_vars['beta']
+
+        if self.target_missing:
+            x_mis = target_vars['x_mis']
+
+        if self.backgound_missing:
+            y_mis = target_vars['y_mis']
+
+        return self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, s=s, alpha=alpha, w=w, beta=beta,
+                              x_mis=x_mis, y_mis = y_mis, x=self.target_dataset, y=self.background_dataset)
 
     def target_q(self, target_vars, params):
         qzi = target_vars['zi']
         qzj = target_vars['zj']
         qti = target_vars['ti']
+
+        qnoise = []
+        qbeta = []
+        qs = []
+        qalpha = []
+        qw = []
+        qx = []
+        qy = []
+
         if self.robust:
             qnoise = target_vars['noise']
-            ljq = self.log_q(params, qzi=qzi, qzj=qzj, qti=qti, qnoise=qnoise)
-        else:
-            ljq = self.log_q(params, qzi=qzi, qzj=qzj, qti=qti)
-        return ljq
 
-    def map(self, num_epochs = 1500, plot=True):
+        if self.sharedARD:
+            qalpha = target_vars['alpha']
+            qs = target_vars['s']
+
+        if self.targetARD:
+            qbeta = target_vars['beta']
+            qw = target_vars['w']
+
+        if self.target_missing:
+            qx = target_vars['x_mis']
+
+        if self.backgound_missing:
+            qy = target_vars['y_mis']
+
+        return self.log_q(params, qzi=qzi, qzj=qzj, qti=qti, qnoise=qnoise, qalpha=qalpha, qs=qs, qw=qw, qbeta=qbeta,
+                          qx=qx, qy=qy)
+
+    def map(self, num_epochs=1500, plot=True, labels=None, seed=0, fn='model_MAP'):
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        zi = tf.Variable(np.ones([self.n, self.k_shared]), dtype=tf.float32)
-        zj = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
-        ti = tf.Variable(np.ones([self.n, self.k_target]), dtype=tf.float32)
+        #tf.random.set_random_seed(seed)
+
+        zi = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
+        zj = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
+        ti = tf.Variable(tf.random.normal([self.n, self.k_target]), dtype=tf.float32)
 
         target_vars = {'zi': zi, 'zj': zj, 'ti': ti}
 
         if self.robust:
-            target_vars['noise'] = tf.Variable(tf.ones([1]), dtype=tf.float32)
+            target_vars['noise'] = tf.Variable(1e-2*tf.ones([1]), dtype=tf.float32)
+
+        if self.targetARD:
+            target_vars['beta'] = tf.Variable(1e-3*tf.ones([self.k_target]), dtype=tf.float32)
+            target_vars['w'] = tf.Variable(1e-3*tf.ones([self.k_target, self.d]), dtype=tf.float32)
+
+        if self.sharedARD:
+            target_vars['alpha'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
+            target_vars['s'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
+
+        # if self.target_missing:
+        #     target_vars['x_mis'] =
 
         energy = -self.target(target_vars)
 
@@ -230,9 +397,45 @@ class clvm:
                     cE, _cx, _cy, _ci = sess.run([energy, zi, zj, ti])
                     learning_curve.append(cE)
 
-            t_inferred_map = sess.run(ti)
+            ti_hat = sess.run(ti)
+            zi_hat = sess.run(zi)
+            zj_hat = sess.run(zj)
+
+            if self.targetARD:
+                w_hat = sess.run(target_vars['w'])
+                b_hat = sess.run(target_vars['beta'])
+                factor_plot(w_hat, b_hat, './results/', 'targetFL.png')
+            else:
+                w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
+                plt.figure()
+                bpplt.hinton(w_hat)
+
+            if self.sharedARD:
+                s_hat = sess.run(target_vars['s'])
+                a_hat = sess.run(target_vars['alpha'])
+                factor_plot(s_hat, a_hat, './results/', 'sharedFL.png')
+            else:
+                s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
+
+            noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
+
+            model = {'lb': learning_curve,
+                     'S': s_hat,
+                     'W': w_hat,
+                     'noise': noise_hat,
+                     'ti': ti_hat,
+                     'zi': zi_hat,
+                     'zj': zj_hat}
+
+            save_name = fn + str(seed) + 'iter' + str(i) + '.pkl'
+            joblib.dump(model, save_name)
+
         if (plot):
-            print('MAP ti shape:', t_inferred_map.shape)
+            print('MAP ti shape:', ti_hat.shape)
+
+            plt.figure()
+            plt.plot(range(1, num_epochs, 5), learning_curve)
+            plt.title("Learning Curve MAP")
 
             c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
                 'tab:gray', 'tab:olive', 'tab:cyan']
@@ -240,19 +443,21 @@ class clvm:
             plt.figure()
             for i, l in enumerate(np.sort(np.unique(labels))):
                 idx = np.where(labels == l)
-                plt.scatter(t_inferred_map[idx, 0], t_inferred_map[idx, 1], marker=ms[i], color=c[i])
+                plt.scatter(ti_hat[idx, 0], ti_hat[idx, 1], marker=ms[i], color=c[i])
             plt.title("Target Latent Space MAP")
             plt.show()
 
-        return t_inferred_map
+        return ti_hat
 
-    def variational_inference(self, num_epochs=2500, plot=True):
+    def variational_inference(self, num_epochs=10000, plot=True, labels=None, seed=1234, fn='model_VI'):
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        qzi_mean = tf.Variable(np.ones([self.n, self.k_shared]), dtype=tf.float32)
-        qzj_mean = tf.Variable(np.ones([self.m, self.k_shared]), dtype=tf.float32)
-        qti_mean = tf.Variable(np.ones([self.n, self.k_target]), dtype=tf.float32)
+        #tf.random.set_random_seed(seed)
+
+        qzi_mean = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
+        qzj_mean = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
+        qti_mean = tf.Variable(tf.random.normal([self.n, self.k_target]), dtype=tf.float32)
         qzi_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.n, self.k_shared]), dtype=tf.float32))
         qzj_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.m, self.k_shared]), dtype=tf.float32))
         qti_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.n, self.k_target]), dtype=tf.float32))
@@ -264,12 +469,44 @@ class clvm:
             params['qnoise_conc'] = tf.Variable(1e-2*tf.ones([1]), dtype=tf.float32)
             params['qnoise_rate'] = tf.nn.softplus(1e-2*tf.Variable(np.ones([1]), dtype=tf.float32))
 
+        if self.sharedARD:
+            params['qs_loc'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
+            params['qs_scale'] = tf.nn.softplus(tf.Variable(1e-2*tf.ones([self.k_shared, self.d]), dtype=tf.float32))
+
+            params['qalpha_loc'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
+            params['qalpha_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_shared]), dtype=tf.float32))
+
+
+        if self.targetARD:
+            params['qw_loc'] = tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32)
+            params['qw_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32))
+
+            params['qbeta_loc'] = tf.Variable(tf.ones([self.k_target]), dtype=tf.float32)
+            params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target]), dtype=tf.float32))
+
+        vars, names = self.variational_model(params)
+
+        qti = vars[names.index('ti')]
+        qzi = vars[names.index('zi')]
+        qzj = vars[names.index('zj')]
+
+        qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti}
+
         if self.robust:
-            qzi, qzj, qti, qnoise = self.variational_model(params)
-            qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti, 'noise': qnoise}
-        else:
-            qzi, qzj, qti = self.variational_model(params)
-            qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti}
+            qnoise = vars[names.index('noise')]
+            qtarget_vars['noise'] = qnoise
+
+        if self.sharedARD:
+            qs = vars[names.index('s')]
+            qalpha = vars[names.index('alpha')]
+            qtarget_vars['s'] = qs
+            qtarget_vars['alpha'] = qalpha
+
+        if self.targetARD:
+            qw = vars[names.index('w')]
+            qbeta = vars[names.index('beta')]
+            qtarget_vars['w'] = qw
+            qtarget_vars['beta'] = qbeta
 
         energy = self.target(qtarget_vars)
         entropy = -self.target_q(qtarget_vars, params)
@@ -291,14 +528,46 @@ class clvm:
                 if i % 5 == 0:
                     learning_curve.append(sess.run([elbo]))
 
-            ti_inferred = sess.run(qti_mean)
+            ti_hat = sess.run(qti_mean)
+            zi_hat = sess.run(qzi_mean)
+            zj_hat = sess.run(qzj_mean)
+
+            if self.sharedARD:
+                s_hat = sess.run(qtarget_vars['s'])
+                a_hat = sess.run(qtarget_vars['alpha'])
+                factor_plot(s_hat, a_hat, './results/', 'VI_sharedFL.png')
+            else:
+                s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
+
+            if self.targetARD:
+                w_hat = sess.run(qtarget_vars['w'])
+                b_hat = sess.run(qtarget_vars['s'])
+                factor_plot(w_hat, b_hat, './results/', 'VI_targetFL.png')
+            else:
+                w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
+
+            if self.robust:
+                noise_hat = sess.run(qtarget_vars['noise'])
+            else:
+                noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
+
+            model = {'lb': learning_curve,
+                     'S': s_hat,
+                     'W': w_hat,
+                     'noise': noise_hat,
+                     'ti': ti_hat,
+                     'zi': zi_hat,
+                     'zj': zj_hat}
+
+            save_name = fn + str(seed) + 'iter' + str(i) + '.pkl'
+            joblib.dump(model, save_name)
 
         if (plot):
             plt.figure()
             plt.plot(range(1, num_epochs, 5), learning_curve)
             plt.title("Learning Curve VI")
 
-            print('VI ti shape:', ti_inferred.shape)
+            print('VI ti shape:', ti_hat.shape)
 
             plt.figure()
             c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
@@ -306,13 +575,12 @@ class clvm:
             ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
             for i, l in enumerate(np.sort(np.unique(labels))):
                 idx = np.where(labels == l)
-                plt.scatter(ti_inferred[idx, 0], ti_inferred[idx, 1], marker=ms[i], color=c[i])
+                plt.scatter(ti_hat[idx, 0], ti_hat[idx, 1], marker=ms[i], color=c[i])
             plt.title("Target Latent Space VI")
 
             plt.show()
 
-
-        return ti_inferred
+        return ti_hat
 
 
 
@@ -322,15 +590,19 @@ if __name__ == '__main__':
     parser.add_argument("--k_target", default=2)
     parser.add_argument("--plot", default=True)
     parser.add_argument("--robust", default=False)
+    parser.add_argument("--sharedARD", default=False)
+    parser.add_argument("--targetARD", default=False)
+    parser.add_argument("--num_epochs", default=1000)
     args = parser.parse_args()
 
     x_train, y_train, labels = build_toy_dataset()
     print('shape of target data:', x_train.shape)
     print('shape of background data:', y_train.shape)
 
-    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust)
-    model.map(plot=args.plot)
-    model.variational_inference(plot=args.plot)
+    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust,
+                 sharedARD=args.sharedARD, targetARD=args.targetARD)
+    model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
+    model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
 
 
 
