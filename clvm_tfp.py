@@ -70,10 +70,6 @@ def factor_plot(w, a, fp, fn, tick_label=None):
 
     bpplt.pyplot.figure(figsize=(10, 10))
     bpplt.hinton(w[order_w, :].T)
-    #bpplt.hinton(w)
-    # if tick_label.any() != None:
-    #     nd = s.shape[1]
-    #     plt.yticks(np.arange(1, nd + 1), tick_label.reshape(-1, 1))
     plt.savefig(fp + fn)
 
     fig, ax = plt.subplots(1,1,dpi=300)
@@ -391,8 +387,11 @@ class clvm:
             target_vars['alpha'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
             target_vars['s'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
 
-        # if self.target_missing:
-        #     target_vars['x_mis'] =
+        if self.target_missing:
+            target_vars['x_mis'] = tf.Variable(tf.random.normal([self.idx_mis.shape[0]]), dtype=tf.float32)
+
+        if self.backgound_missing:
+            target_vars['y_mis'] = tf.Variable(tf.random.normal([self.idy_mis.shape[0]]), dtype=tf.float32)
 
         energy = -self.target(target_vars)
 
@@ -468,7 +467,7 @@ class clvm:
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        #tf.random.set_random_seed(seed)
+        tf.random.set_random_seed(seed)
 
         qzi_mean = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
         qzj_mean = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
@@ -565,14 +564,14 @@ class clvm:
             if self.sharedARD:
                 s_hat = sess.run(qtarget_vars['s'])
                 a_hat = sess.run(qtarget_vars['alpha'])
-                factor_plot(s_hat, a_hat, './results/', 'VI_sharedFL.png')
+                factor_plot(s_hat, a_hat, '../results/', 'VI_sharedFL.png')
             else:
                 s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
 
             if self.targetARD:
                 w_hat = sess.run(qtarget_vars['w'])
                 b_hat = sess.run(qtarget_vars['s'])
-                factor_plot(w_hat, b_hat, './results/', 'VI_targetFL.png')
+                factor_plot(w_hat, b_hat, '../results/', 'VI_targetFL.png')
             else:
                 w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
 
