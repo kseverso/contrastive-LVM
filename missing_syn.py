@@ -50,10 +50,8 @@ def build_toy_missing_dataset(ml):
 
     return A, B, labels
 
-x_train, y_train, labels = build_toy_missing_dataset(0.2)
+x_train, y_train, labels = build_toy_missing_dataset(0.6)
 
-
-# model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust,
-#                  sharedARD=args.sharedARD, targetARD=args.targetARD)
-#     model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
-#     model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
+model = clvm(x_train, y_train, 10,2, target_missing=True)
+#model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
+model.variational_inference(plot=True, num_epochs=10000, labels=labels)

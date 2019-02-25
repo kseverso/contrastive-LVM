@@ -114,11 +114,22 @@ class clvm:
         self.backgound_missing = background_missing
 
         if self.target_missing:
-            self.ix_obs = ~np.isnan(self.target_dataset)
-            self.ix_mis = np.isnan(self.target_dataset)
+            tobs = np.ones(self.target_dataset.shape).astype(np.int64)
+            tobs[np.isnan(self.target_dataset)] = 0
+            tr, tc = np.where(tobs == 1)
+            self.idx_obs = np.squeeze(np.dstack((tr, tc)))
+            trm, tcm = np.where(tobs == 0)
+            self.idx_mis = np.squeeze(np.dstack((trm, tcm)))
+            self.target_dataset = self.target_dataset[~np.isnan(self.target_dataset)]
+
         if self.backgound_missing:
-            self.iy_obs = ~np.isnan(self.background_dataset)
-            self.iy_mis = np.isnan(self.background_dataset)
+            bobs = np.ones(self.background_dataset.shape).astype(int)
+            bobs[np.isnan(self.background_dataset)] = 0
+            br, bc = np.where(bobs == 1)
+            self.idy_obs = np.squeeze(np.dstack((br, bc)))
+            brm, bcm = np.where(bobs == 0)
+            self.idy_mis = np.squeeze(np.dstack((brm, bcm)))
+            self.background_dataset = self.background_dataset[~np.isnan(self.background_dataset)]
 
         self.log_joint = ed.make_log_joint_fn(self.clvm_model)
         self.log_q = ed.make_log_joint_fn(self.variational_model)
@@ -200,19 +211,23 @@ class clvm:
 
         # Observed vectors
         if self.target_missing:
-            x = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), self.ix_obs),
-                          scale=tf.gather_nd(noise*tf.ones([self.n, self.d]), self.ix_obs))
-            x_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(self.zi, s) + tf.matmul(self.ti, w), self.ix_mis),
-                              scale=tf.gather_nd(noise*tf.ones([self.n, self.d], self.ix_mis)))
+            ix_obs = self.idx_obs
+            ix_mis = self.idx_mis
+            x = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), ix_obs),
+                          scale=tf.gather_nd(noise*tf.ones([self.n, self.d]), ix_obs), name="x")
+            x_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), ix_mis),
+                              scale=tf.gather_nd(noise*tf.ones([self.n, self.d]), ix_mis), name="x_mis")
             latent_vars = latent_vars + (x_mis, )
         else:
             x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
                         scale=noise * tf.ones([self.n, self.d]), name="x")
         if self.backgound_missing:
-            y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), self.iy_obs),
-                          scale=tf.gather_nd(noise*tf.ones([self.m, self.d], self.iy_obs)))
-            y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), self.iy_mis),
-                              scale=tf.gather_nd(noise*tf.ones([self.m, self.d], self.iy_mis)))
+            iy_obs = self.idy_obs
+            iy_mis = self.idy_mis
+            y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_obs),
+                          scale=tf.gather_nd(noise*tf.ones([self.m, self.d], iy_obs)), name="y")
+            y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_mis),
+                              scale=tf.gather_nd(noise*tf.ones([self.m, self.d]), iy_mis), name="y_mis")
             latent_vars = latent_vars + (y_mis, )
         else:
             y = ed.Normal(loc=tf.matmul(zj, s),
@@ -273,22 +288,22 @@ class clvm:
             q_latent_vars_names.append('beta')
 
         if self.target_missing:
-            qtarget_loc = params['qtarget_loc']
-            qtarget_scale = params['qtarget_scale']
+            qtarget_loc = params['qx_loc']
+            qtarget_scale = params['qx_scale']
             qx = ed.Normal(loc=qtarget_loc, scale=qtarget_scale, name="qx")
             q_latent_vars = q_latent_vars + (qx, )
-            q_latent_vars_names.append('qx')
+            q_latent_vars_names.append('x_mis')
 
         if self.backgound_missing:
-            qbackground_loc = params['qbackground_loc']
-            qbackground_scale = params['qbackground_scale']
+            qbackground_loc = params['qy_loc']
+            qbackground_scale = params['qy_scale']
             qy = ed.Normal(loc=qbackground_loc, scale=qbackground_scale, name="qy")
             q_latent_vars = q_latent_vars + (qy, )
-            q_latent_vars_names.append('qy')
+            q_latent_vars_names.append('y_mis')
 
         return q_latent_vars, q_latent_vars_names
 
-    def target(self, target_vars):
+    def target(self, target_vars): #might be able to combine target and target_q
         zi = target_vars['zi']
         zj = target_vars['zj']
         ti = target_vars['ti']
@@ -319,7 +334,7 @@ class clvm:
             y_mis = target_vars['y_mis']
 
         return self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, s=s, alpha=alpha, w=w, beta=beta,
-                              x_mis=x_mis, y_mis = y_mis, x=self.target_dataset, y=self.background_dataset)
+                              x_mis=x_mis, y_mis=y_mis, x=self.target_dataset, y=self.background_dataset)
 
     def target_q(self, target_vars, params):
         qzi = target_vars['zi']
@@ -476,13 +491,20 @@ class clvm:
             params['qalpha_loc'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
             params['qalpha_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_shared]), dtype=tf.float32))
 
-
         if self.targetARD:
             params['qw_loc'] = tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32)
             params['qw_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32))
 
             params['qbeta_loc'] = tf.Variable(tf.ones([self.k_target]), dtype=tf.float32)
             params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target]), dtype=tf.float32))
+
+        if self.target_missing:
+            params['qx_loc'] = tf.Variable(tf.random_uniform([self.idx_mis.shape[0]]))
+            params['qx_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idx_mis.shape[0]])))
+
+        if self.backgound_missing:
+            params['qy_loc'] = tf.Variable(tf.random_uniform([self.idy_mis.shape[0]]))
+            params['qy_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idx_mis.shape[0]])))
 
         vars, names = self.variational_model(params)
 
@@ -507,6 +529,14 @@ class clvm:
             qbeta = vars[names.index('beta')]
             qtarget_vars['w'] = qw
             qtarget_vars['beta'] = qbeta
+
+        if self.target_missing:
+            qx = vars[names.index('x_mis')]
+            qtarget_vars['x_mis'] = qx
+
+        if self.backgound_missing:
+            qy = vars[name.index('y_mis')]
+            qtarget_vars['y_mis'] = qy
 
         energy = self.target(qtarget_vars)
         entropy = -self.target_q(qtarget_vars, params)
@@ -551,6 +581,12 @@ class clvm:
             else:
                 noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
 
+            if self.target_missing:
+                x_hat = sess.run(qtarget_vars['x_mis'])
+
+            if self.backgound_missing:
+                y_hat = sess.run(qtarget_vars['y_mis'])
+
             model = {'lb': learning_curve,
                      'S': s_hat,
                      'W': w_hat,
@@ -578,10 +614,16 @@ class clvm:
                 plt.scatter(ti_hat[idx, 0], ti_hat[idx, 1], marker=ms[i], color=c[i])
             plt.title("Target Latent Space VI")
 
+            if self.target_missing:
+                x_complete = np.zeros((self.n, self.d))
+                x_complete[self.idx_obs[:,0], self.idx_obs[:,1]] = self.target_dataset
+                x_complete[self.idx_mis[:,0], self.idx_mis[:,1]] = x_hat
+                plt.figure()
+                plt.imshow(x_complete)
+
             plt.show()
 
         return ti_hat
-
 
 
 if __name__ == '__main__':
