@@ -39,7 +39,7 @@ Ks = 2 #latent dimensionality of shared space
 Ki = 2 #latent dimensionality of indepedent space
 
 
-#model = clvm(A, B, D-1, Ki, sharedARD=True, robust_flag=True)
-model = clvm(A, B, Ks, Ki)
+model = clvm(A, B, D-1, Ki, sharedARD=True, robust_flag=True)
+#model = clvm(A, B, Ks, Ki)
 model.variational_inference(num_epochs=20000, plot=True, labels=labels)
 
