@@ -1,4 +1,6 @@
 import numpy as np
+import sys
+sys.path.append('/mnt/data/kas/clvm/contrastive-LVM')
 from clvm_tfp import clvm
 import matplotlib.pyplot as plt
 from sklearn.externals import joblib
