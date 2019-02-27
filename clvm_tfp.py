@@ -107,7 +107,7 @@ class clvm:
         self.targetARD = targetARD
         self.sharedARD = sharedARD
         self.target_missing = target_missing
-        self.backgound_missing = background_missing
+        self.background_missing = background_missing
 
         if self.target_missing:
             tobs = np.ones(self.target_dataset.shape).astype(np.int64)
@@ -118,8 +118,8 @@ class clvm:
             self.idx_mis = np.squeeze(np.dstack((trm, tcm)))
             self.target_dataset = self.target_dataset[~np.isnan(self.target_dataset)]
 
-        if self.backgound_missing:
-            bobs = np.ones(self.background_dataset.shape).astype(int)
+        if self.background_missing:
+            bobs = np.ones(self.background_dataset.shape).astype(np.int64)
             bobs[np.isnan(self.background_dataset)] = 0
             br, bc = np.where(bobs == 1)
             self.idy_obs = np.squeeze(np.dstack((br, bc)))
@@ -217,11 +217,11 @@ class clvm:
         else:
             x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
                         scale=noise * tf.ones([self.n, self.d]), name="x")
-        if self.backgound_missing:
+        if self.background_missing:
             iy_obs = self.idy_obs
             iy_mis = self.idy_mis
             y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_obs),
-                          scale=tf.gather_nd(noise*tf.ones([self.m, self.d], iy_obs)), name="y")
+                          scale=tf.gather_nd(noise*tf.ones([self.m, self.d]), iy_obs), name="y")
             y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_mis),
                               scale=tf.gather_nd(noise*tf.ones([self.m, self.d]), iy_mis), name="y_mis")
             latent_vars = latent_vars + (y_mis, )
@@ -290,7 +290,7 @@ class clvm:
             q_latent_vars = q_latent_vars + (qx, )
             q_latent_vars_names.append('x_mis')
 
-        if self.backgound_missing:
+        if self.background_missing:
             qbackground_loc = params['qy_loc']
             qbackground_scale = params['qy_scale']
             qy = ed.Normal(loc=qbackground_loc, scale=qbackground_scale, name="qy")
@@ -326,7 +326,7 @@ class clvm:
         if self.target_missing:
             x_mis = target_vars['x_mis']
 
-        if self.backgound_missing:
+        if self.background_missing:
             y_mis = target_vars['y_mis']
 
         return self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, s=s, alpha=alpha, w=w, beta=beta,
@@ -359,7 +359,7 @@ class clvm:
         if self.target_missing:
             qx = target_vars['x_mis']
 
-        if self.backgound_missing:
+        if self.background_missing:
             qy = target_vars['y_mis']
 
         return self.log_q(params, qzi=qzi, qzj=qzj, qti=qti, qnoise=qnoise, qalpha=qalpha, qs=qs, qw=qw, qbeta=qbeta,
@@ -390,7 +390,7 @@ class clvm:
         if self.target_missing:
             target_vars['x_mis'] = tf.Variable(tf.random.normal([self.idx_mis.shape[0]]), dtype=tf.float32)
 
-        if self.backgound_missing:
+        if self.background_missing:
             target_vars['y_mis'] = tf.Variable(tf.random.normal([self.idy_mis.shape[0]]), dtype=tf.float32)
 
         energy = -self.target(target_vars)
@@ -463,7 +463,8 @@ class clvm:
 
         return ti_hat
 
-    def variational_inference(self, num_epochs=10000, plot=True, labels=None, seed=1234, fn='model_VI'):
+    def variational_inference(self, num_epochs=10000, plot=True, labels=None, seed=1234,
+                              fn='model_VI', fp='../results/'):
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
@@ -501,11 +502,12 @@ class clvm:
             params['qx_loc'] = tf.Variable(tf.random_uniform([self.idx_mis.shape[0]]))
             params['qx_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idx_mis.shape[0]])))
 
-        if self.backgound_missing:
+        if self.background_missing:
             params['qy_loc'] = tf.Variable(tf.random_uniform([self.idy_mis.shape[0]]))
-            params['qy_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idx_mis.shape[0]])))
+            params['qy_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idy_mis.shape[0]])))
 
         vars, names = self.variational_model(params)
+        print('Check names:', names)
 
         qti = vars[names.index('ti')]
         qzi = vars[names.index('zi')]
@@ -533,8 +535,8 @@ class clvm:
             qx = vars[names.index('x_mis')]
             qtarget_vars['x_mis'] = qx
 
-        if self.backgound_missing:
-            qy = vars[name.index('y_mis')]
+        if self.background_missing:
+            qy = vars[names.index('y_mis')]
             qtarget_vars['y_mis'] = qy
 
         energy = self.target(qtarget_vars)
@@ -556,6 +558,47 @@ class clvm:
                 sess.run(train)
                 if i % 5 == 0:
                     learning_curve.append(sess.run([elbo]))
+                if i % 2000 == 0:
+                    #save model every 2000 iterations
+                    ti_hat = sess.run(qti_mean)
+                    zi_hat = sess.run(qzi_mean)
+                    zj_hat = sess.run(qzj_mean)
+
+                    if self.sharedARD:
+                        s_hat = sess.run(qtarget_vars['s'])
+                        a_hat = sess.run(qtarget_vars['alpha'])
+                        factor_plot(s_hat, a_hat, fp, fn + 'VI_sharedFL' + str(seed) + '.png')
+                    else:
+                        s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
+
+                    if self.targetARD:
+                        w_hat = sess.run(qtarget_vars['w'])
+                        b_hat = sess.run(qtarget_vars['beta'])
+                        factor_plot(w_hat, b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
+                    else:
+                        w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
+
+                    if self.robust:
+                        noise_hat = sess.run(qtarget_vars['noise'])
+                    else:
+                        noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
+
+                    if self.target_missing:
+                        x_hat = sess.run(qtarget_vars['x_mis'])
+
+                    if self.background_missing:
+                        y_hat = sess.run(qtarget_vars['y_mis'])
+
+                    model = {'lb': learning_curve,
+                             'S': s_hat,
+                             'W': w_hat,
+                             'noise': noise_hat,
+                             'ti': ti_hat,
+                             'zi': zi_hat,
+                             'zj': zj_hat}
+
+                    save_name = fp + fn + str(seed) + 'iter' + str(i) + '.pkl'
+                    joblib.dump(model, save_name)
 
             ti_hat = sess.run(qti_mean)
             zi_hat = sess.run(qzi_mean)
@@ -564,14 +607,14 @@ class clvm:
             if self.sharedARD:
                 s_hat = sess.run(qtarget_vars['s'])
                 a_hat = sess.run(qtarget_vars['alpha'])
-                factor_plot(s_hat, a_hat, '../results/', 'VI_sharedFL.png')
+                factor_plot(s_hat, a_hat, fp,  fn + 'VI_sharedFL' + str(seed) + '.png')
             else:
                 s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
 
             if self.targetARD:
                 w_hat = sess.run(qtarget_vars['w'])
                 b_hat = sess.run(qtarget_vars['s'])
-                factor_plot(w_hat, b_hat, '../results/', 'VI_targetFL.png')
+                factor_plot(w_hat, b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
             else:
                 w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
 
@@ -583,7 +626,7 @@ class clvm:
             if self.target_missing:
                 x_hat = sess.run(qtarget_vars['x_mis'])
 
-            if self.backgound_missing:
+            if self.background_missing:
                 y_hat = sess.run(qtarget_vars['y_mis'])
 
             model = {'lb': learning_curve,
@@ -594,7 +637,7 @@ class clvm:
                      'zi': zi_hat,
                      'zj': zj_hat}
 
-            save_name = fn + str(seed) + 'iter' + str(i) + '.pkl'
+            save_name = fp + fn + str(seed) + 'iter' + str(i) + '.pkl'
             joblib.dump(model, save_name)
 
         if (plot):
