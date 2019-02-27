@@ -481,8 +481,8 @@ class clvm:
                   'qzj_mean': qzj_mean, 'qzj_stddv': qzj_stddv}
 
         if self.robust:
-            params['qnoise_loc'] = tf.Variable(tf.random.normal(), dtype=tf.float32)
-            params['qnoise_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal(stddev=0.01), dtype=tf.float32))
+            params['qnoise_loc'] = tf.Variable(tf.random.normal([1]), dtype=tf.float32)
+            params['qnoise_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([1], stddev=0.01), dtype=tf.float32))
 
         if self.sharedARD:
             params['qs_loc'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
@@ -496,7 +496,7 @@ class clvm:
             params['qw_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([self.k_target, self.d], stddev=0.1), dtype=tf.float32))
 
             params['qbeta_loc'] = tf.Variable(tf.random_normal([self.k_target]), dtype=tf.float32)
-            params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target], stddev=0.01), dtype=tf.float32))
+            params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([self.k_target], stddev=0.01), dtype=tf.float32))
 
         if self.target_missing:
             params['qx_loc'] = tf.Variable(tf.random_normal([self.idx_mis.shape[0]]))
