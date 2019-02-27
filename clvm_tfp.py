@@ -127,8 +127,8 @@ class clvm:
             self.idy_mis = np.squeeze(np.dstack((brm, bcm)))
             self.background_dataset = self.background_dataset[~np.isnan(self.background_dataset)]
 
-        self.log_joint = ed.make_log_joint_fn(self.clvm_model)
-        self.log_q = ed.make_log_joint_fn(self.variational_model)
+        self.log_joint = ed.make_log_joint_fn(self._clvm_model)
+        self.log_q = ed.make_log_joint_fn(self._variational_model)
 
     def get_parameter(self, shape, name, pos_flag=False):
         if pos_flag:
@@ -167,7 +167,7 @@ class clvm:
 
         return set_values
 
-    def clvm_model(self):  # (unmodeled) data
+    def _clvm_model(self):  # (unmodeled) data
         # note: using initializer=tf.ones([self.k_shared, self.d], dtype=tf.float32)) caused issues
 
         # Latent vectors
@@ -231,7 +231,7 @@ class clvm:
 
         return (x, y), latent_vars
 
-    def variational_model(self, params):
+    def _variational_model(self, params):
         '''
 
         :param params: dictionary of the variational parameters (typically called lambda) that minimize the KL
@@ -253,8 +253,8 @@ class clvm:
         q_latent_vars_names = ['zi', 'zj', 'ti']
 
         if self.robust:
-            qnoise_loc = params['qnoise_conc']
-            qnoise_scale = params['qnoise_rate']
+            qnoise_loc = params['qnoise_loc']
+            qnoise_scale = params['qnoise_scale']
             qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_loc, scale=qnoise_scale))
             q_latent_vars = q_latent_vars + (qnoise, )
             q_latent_vars_names.append('noise')
@@ -299,7 +299,7 @@ class clvm:
 
         return q_latent_vars, q_latent_vars_names
 
-    def target(self, target_vars): #might be able to combine target and target_q
+    def _target(self, target_vars): #might be able to combine target and target_q
         zi = target_vars['zi']
         zj = target_vars['zj']
         ti = target_vars['ti']
@@ -332,7 +332,7 @@ class clvm:
         return self.log_joint(zi=zi, zj=zj, ti=ti, noise=noise, s=s, alpha=alpha, w=w, beta=beta,
                               x_mis=x_mis, y_mis=y_mis, x=self.target_dataset, y=self.background_dataset)
 
-    def target_q(self, target_vars, params):
+    def _target_q(self, target_vars, params):
         qzi = target_vars['zi']
         qzj = target_vars['zj']
         qti = target_vars['ti']
@@ -377,14 +377,14 @@ class clvm:
         target_vars = {'zi': zi, 'zj': zj, 'ti': ti}
 
         if self.robust:
-            target_vars['noise'] = tf.Variable(1e-2*tf.ones([1]), dtype=tf.float32)
+            target_vars['noise'] = tf.Variable(tf.nn.softplus(tf.random.normal(stddev=0.01)), dtype=tf.float32)
 
         if self.targetARD:
-            target_vars['beta'] = tf.Variable(1e-3*tf.ones([self.k_target]), dtype=tf.float32)
-            target_vars['w'] = tf.Variable(1e-3*tf.ones([self.k_target, self.d]), dtype=tf.float32)
+            target_vars['beta'] = tf.Variable(tf.nn.softplus(tf.random.normal([self.k_target])), dtype=tf.float32)
+            target_vars['w'] = tf.Variable(tf.random.normal([self.k_target, self.d]), dtype=tf.float32)
 
         if self.sharedARD:
-            target_vars['alpha'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
+            target_vars['alpha'] = tf.Variable(tf.nn.softplus(tf.random.normal([self.k_shared])), dtype=tf.float32)
             target_vars['s'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
 
         if self.target_missing:
@@ -393,7 +393,7 @@ class clvm:
         if self.background_missing:
             target_vars['y_mis'] = tf.Variable(tf.random.normal([self.idy_mis.shape[0]]), dtype=tf.float32)
 
-        energy = -self.target(target_vars)
+        energy = -self._target(target_vars)
 
         optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
         train = optimizer.minimize(energy)
@@ -473,40 +473,40 @@ class clvm:
         qzi_mean = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
         qzj_mean = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
         qti_mean = tf.Variable(tf.random.normal([self.n, self.k_target]), dtype=tf.float32)
-        qzi_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.n, self.k_shared]), dtype=tf.float32))
-        qzj_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.m, self.k_shared]), dtype=tf.float32))
-        qti_stddv = tf.nn.softplus(tf.Variable(-4 * np.ones([self.n, self.k_target]), dtype=tf.float32))
+        qzi_stddv = tf.nn.softplus(tf.Variable(tf.random.normal([self.n, self.k_shared], stddev=0.01), dtype=tf.float32))
+        qzj_stddv = tf.nn.softplus(tf.Variable(tf.random.normal([self.m, self.k_shared], stddev=0.01), dtype=tf.float32))
+        qti_stddv = tf.nn.softplus(tf.Variable(tf.random.normal([self.n, self.k_target], stddev=0.01), dtype=tf.float32))
 
         params = {'qzi_mean': qzi_mean, 'qzi_stddv': qzi_stddv, 'qti_mean': qti_mean, 'qti_stddv': qti_stddv,
                   'qzj_mean': qzj_mean, 'qzj_stddv': qzj_stddv}
 
         if self.robust:
-            params['qnoise_conc'] = tf.Variable(1e-2*tf.ones([1]), dtype=tf.float32)
-            params['qnoise_rate'] = tf.nn.softplus(1e-2*tf.Variable(np.ones([1]), dtype=tf.float32))
+            params['qnoise_loc'] = tf.Variable(tf.random.normal(), dtype=tf.float32)
+            params['qnoise_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal(stddev=0.01), dtype=tf.float32))
 
         if self.sharedARD:
             params['qs_loc'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
-            params['qs_scale'] = tf.nn.softplus(tf.Variable(1e-2*tf.ones([self.k_shared, self.d]), dtype=tf.float32))
+            params['qs_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([self.k_shared, self.d], stddev=0.1), dtype=tf.float32))
 
-            params['qalpha_loc'] = tf.Variable(1e-3*tf.ones([self.k_shared]), dtype=tf.float32)
-            params['qalpha_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_shared]), dtype=tf.float32))
+            params['qalpha_loc'] = tf.Variable(tf.random.normal([self.k_shared]), dtype=tf.float32)
+            params['qalpha_scale'] = tf.nn.softplus(tf.Variable(tf.random_normal([self.k_shared], stddev=0.01), dtype=tf.float32))
 
         if self.targetARD:
-            params['qw_loc'] = tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32)
-            params['qw_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target, self.d]), dtype=tf.float32))
+            params['qw_loc'] = tf.Variable(tf.random.normal([self.k_target, self.d]), dtype=tf.float32)
+            params['qw_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([self.k_target, self.d], stddev=0.1), dtype=tf.float32))
 
-            params['qbeta_loc'] = tf.Variable(tf.ones([self.k_target]), dtype=tf.float32)
-            params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target]), dtype=tf.float32))
+            params['qbeta_loc'] = tf.Variable(tf.random_normal([self.k_target]), dtype=tf.float32)
+            params['qbeta_scale'] = tf.nn.softplus(tf.Variable(tf.ones([self.k_target], stddev=0.01), dtype=tf.float32))
 
         if self.target_missing:
-            params['qx_loc'] = tf.Variable(tf.random_uniform([self.idx_mis.shape[0]]))
-            params['qx_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idx_mis.shape[0]])))
+            params['qx_loc'] = tf.Variable(tf.random_normal([self.idx_mis.shape[0]]))
+            params['qx_scale'] = tf.Variable(tf.nn.softplus(tf.random_normal([self.idx_mis.shape[0]])))
 
         if self.background_missing:
-            params['qy_loc'] = tf.Variable(tf.random_uniform([self.idy_mis.shape[0]]))
-            params['qy_scale'] = tf.Variable(tf.nn.softplus(tf.random_uniform([self.idy_mis.shape[0]])))
+            params['qy_loc'] = tf.Variable(tf.random_normal([self.idy_mis.shape[0]]))
+            params['qy_scale'] = tf.Variable(tf.nn.softplus(tf.random_normal([self.idy_mis.shape[0]])))
 
-        vars, names = self.variational_model(params)
+        vars, names = self._variational_model(params)
         print('Check names:', names)
 
         qti = vars[names.index('ti')]
@@ -539,8 +539,8 @@ class clvm:
             qy = vars[names.index('y_mis')]
             qtarget_vars['y_mis'] = qy
 
-        energy = self.target(qtarget_vars)
-        entropy = -self.target_q(qtarget_vars, params)
+        energy = self._target(qtarget_vars)
+        entropy = -self._target_q(qtarget_vars, params)
 
         elbo = energy + entropy
 
@@ -613,7 +613,7 @@ class clvm:
 
             if self.targetARD:
                 w_hat = sess.run(qtarget_vars['w'])
-                b_hat = sess.run(qtarget_vars['s'])
+                b_hat = sess.run(qtarget_vars['beta'])
                 factor_plot(w_hat, b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
             else:
                 w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
@@ -663,7 +663,7 @@ class clvm:
                 plt.figure()
                 plt.imshow(x_complete)
 
-            plt.show()
+            #plt.show()
 
         return ti_hat
 
