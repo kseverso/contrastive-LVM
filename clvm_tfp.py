@@ -464,7 +464,7 @@ class clvm:
         return ti_hat
 
     def variational_inference(self, num_epochs=10000, plot=True, labels=None, seed=1234,
-                              fn='model_VI', fp='../results/'):
+                              fn='model_VI', fp='./results/'):
 
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
@@ -663,7 +663,7 @@ class clvm:
                 plt.figure()
                 plt.imshow(x_complete)
 
-            #plt.show()
+            plt.show()
 
         return ti_hat
 
