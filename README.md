@@ -18,8 +18,8 @@ The environment can be deactivated using:
 
 ### Setting up the model
 The clvm class requires:
-1. A target dataset
-2. A background dataset
+1. A target dataset, with N rows of observations, each with D measurements
+2. A background dataset, with M rows of observations, each with D measurements
 3. The dimension of the shared latent space (default 10)
 4. The dimension of the target latent space (default 2)
 
@@ -51,4 +51,6 @@ Both have the option to specify:
 * seed: set a particular seed
 * fn: filename to store the model results
 
-Both methods return the target latent representation and save the learned model and objective function to a folder named results.
+Both methods return the target latent representation and save the learned model and objective function to a folder named results. An example of variational inference applied to the above model would be:
+
+`t_hat = model.variational_inference(num_epochs=5000, fn='trained model', fp='../results/')`
