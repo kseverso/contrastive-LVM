@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 import argparse
 
-from utils import factor_plot
+from utils.factor_plot import factor_plot
 
 from bayespy import plot as bpplt
 
@@ -690,7 +690,7 @@ class clvm:
 
         if self.targetARD:
             w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qw_loc:0'))
-            b_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qb_loc:0'))
+            b_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qbeta_loc:0'))
             factor_plot(w_hat, b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
         else:
             w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
