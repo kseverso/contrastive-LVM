@@ -443,7 +443,7 @@ class clvm:
         return params
 
 
-    def map(self, num_epochs=1500, plot=True, labels=None, seed=0, fn='model_MAP', fp='./results/'):
+    def map(self, num_epochs=1500, plot=False, labels=None, seed=0, fn='model_MAP', fp='./results/'):
         """
         method to apply maximum a postiori inference to clvm
         :param num_epochs: optional, number of interations
@@ -532,7 +532,7 @@ class clvm:
             save_name = fn + str(seed) + 'iter' + str(i) + '.pkl'
             joblib.dump(model, save_name)
 
-        if (plot):
+        if plot:
 
             plt.figure()
             plt.plot(range(1, num_epochs, 5), learning_curve)
@@ -550,7 +550,7 @@ class clvm:
 
         return ti_hat
 
-    def variational_inference(self, num_epochs=10000, plot=True, labels=None, seed=1234,
+    def variational_inference(self, num_epochs=10000, plot=False, labels=None, seed=1234,
                               fn='model_VI', fp='./results/', saveGraph=False):
         """
         method to perform variational inference on a clvm model
@@ -629,13 +629,13 @@ class clvm:
                     self._save_MAP(sess, fp, fn, i, learning_curve, seed)
 
                     if saveGraph:
-                        save_path = saver.save(sess, './checkpoint/model.ckpt')
+                        save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
                         print("Model saved in path: %s" % save_path)
 
             self._save_MAP(sess, fp, fn, i, learning_curve, seed)
 
             if saveGraph:
-                save_path = saver.save(sess, './checkpoint/Finalmodel.ckpt')
+                save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
                 print("Model saved in path: %s" % save_path)
 
             ti_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qti_loc:0'))
@@ -723,10 +723,11 @@ class clvm:
         save_name = fp + fn + str(seed) + 'iter' + str(iter) + '.pkl'
         joblib.dump(model, save_name)
 
-    def restore_graph(self, predict=False, num_epochs=1000, plot=False, labels=None):
+    def restore_graph(self, fn="./checkpoint/Finalmodel.ckpt", predict=False, num_epochs=1000, plot=False, labels=None):
         """
         function to restore the values of a previously trained clvm; option to use model to predict latent variables
         for testing data
+        :param fn: filename of the checkpoint file
         :param predict: optional, boolean to indicate if predictions are being made
         :param num_epochs: optional, number of iterations if predictions are being made
         :param plot: optional, boolean if plots should be generated
@@ -763,7 +764,7 @@ class clvm:
 
         with tf.Session() as sess:
 
-            saver.restore(sess, "./checkpoint/Finalmodel.ckpt")
+            saver.restore(sess, fn)
             print("t : %s" % predict_params['qti_mean'].eval())
 
             for i in range(num_epochs):
