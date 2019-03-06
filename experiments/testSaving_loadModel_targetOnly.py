@@ -45,8 +45,11 @@ def build_toy_dataset():
     return A, B, labels
 
 
+
 x_test, y_test, labels = build_toy_dataset()
 
-model = clvm(x_test, y_test, 10, 2)
+#y_test = None
+
+model = clvm(x_test, y_test, 10, 2, predict_target=True)
 model.initialize()
 model.restore_graph(num_epochs=10000, plot=True, labels=labels)
