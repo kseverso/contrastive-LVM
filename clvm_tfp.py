@@ -122,6 +122,18 @@ class clvm:
             self.idy_mis = np.squeeze(np.dstack((brm, bcm)))
             self.background_dataset = self.background_dataset[~np.isnan(self.background_dataset)]
 
+        # initialize variables for the posterior estimates
+        self.ti_hat = None
+        self.zi_hat = None
+        self.zj_hat = None
+        self.w_hat = None
+        self.s_hat = None
+        self.noise_hat = None
+        if self.sharedARD:
+            self.a_hat = None
+        if self.targetARD:
+            self.b_hat = None
+
         self.log_joint = None
         self.log_q = None
 
@@ -165,7 +177,37 @@ class clvm:
                             1.0 / tf.nn.softplus(tf.get_variable("scale", shape)),
                             name=name)
 
-    def make_value_setter(self, **model_kwargs):
+    def replace_params(self, z):
+
+        def interceptor(rv_constructor, *rv_args, **rv_kwargs):
+            name = rv_kwargs.pop("name")
+            if name == "w":
+                rv_kwargs["value"] = self.w_inferred
+            if name == "z":
+                rv_kwargs["value"] = z
+            return rv_constructor(*rv_args, **rv_kwargs)
+
+        return interceptor
+
+    def generate(self):
+
+        var_list = {'zi': self.zi_hat, 'zj': self.zj_hat, 'ti': self.ti_hat, 'w': self.w_hat, 's': self.s_hat,
+                    'noise': self.noise_hat}
+
+        if self.sharedARD:
+            var_list['beta'] = self.b_hat
+        if self.targetARD:
+            var_list['alpha'] = self.a_hat
+
+        with ed.interception(self._make_value_setter(**var_list)):
+            generate = self._clvm_model()
+
+        with tf.Session() as sess:
+            (x_generated, y_generated), _ = sess.run(generate)
+
+        return x_generated, y_generated
+
+    def _make_value_setter(self, **model_kwargs):
         """Creates a value-setting interceptor."""
 
         def set_values(f, *args, **kwargs):
@@ -191,36 +233,38 @@ class clvm:
 
         latent_vars = (zi, zj, ti)
 
-        # Parameters
-        # Depending on the modeling choices, random, unobserved variables will be appended to latent_vars
-        # shared factor loading
-        if self.sharedARD:
-            alpha = ed.Gamma(concentration=1e-3*tf.ones([self.k_shared]),
-                             rate=1e-3*tf.ones([self.k_shared]), name="alpha")
-            s = ed.Normal(loc=tf.zeros([self.k_shared, self.d]),
-                          scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.d])), name="s")
-            latent_vars = latent_vars + (alpha, s,)
-        else:
-            s = self._get_parameter([self.k_shared, self.d], "s")
 
-        # target factor loading
-        if self.targetARD:
-            beta = ed.Gamma(concentration=1e-3*tf.ones([self.k_target]),
-                            rate=1e-3*tf.ones([self.k_target]), name="beta")
-            w = ed.Normal(loc=tf.zeros([self.k_target, self.d]),
-                          scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.d])), name="w")
-            latent_vars = latent_vars + (beta, w,)
-        else:
-            w = self._get_parameter([self.k_target, self.d], "w")
+        with tf.variable_scope('clvm_params'):
+            # Parameters
+            # Depending on the modeling choices, random, unobserved variables will be appended to latent_vars
+            # shared factor loading
+            if self.sharedARD:
+                alpha = ed.Gamma(concentration=1e-3*tf.ones([self.k_shared]),
+                                 rate=1e-3*tf.ones([self.k_shared]), name="alpha")
+                s = ed.Normal(loc=tf.zeros([self.k_shared, self.d]),
+                              scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.d])), name="s")
+                latent_vars = latent_vars + (alpha, s,)
+            else:
+                s = self._get_parameter([self.k_shared, self.d], "s")
 
-        # noise
-        if self.robust:
-            noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
-            latent_vars = latent_vars + (noise,)
-        else:
-            noise = self._get_parameter([1], "noise", True)
+            # target factor loading
+            if self.targetARD:
+                beta = ed.Gamma(concentration=1e-3*tf.ones([self.k_target]),
+                                rate=1e-3*tf.ones([self.k_target]), name="beta")
+                w = ed.Normal(loc=tf.zeros([self.k_target, self.d]),
+                              scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.d])), name="w")
+                latent_vars = latent_vars + (beta, w,)
+            else:
+                w = self._get_parameter([self.k_target, self.d], "w")
 
-        # Observed vectors
+            # noise
+            if self.robust:
+                noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
+                latent_vars = latent_vars + (noise,)
+            else:
+                noise = self._get_parameter([1], "noise", True)
+
+        # Observed vectors, depends on the particular data, therefore not included in parameter scope
         if self.target_missing:
             ix_obs = self.idx_obs
             ix_mis = self.idx_mis
@@ -267,36 +311,38 @@ class clvm:
         q_latent_vars = (qzi, qzj, qti)
         q_latent_vars_names = ['zi', 'zj', 'ti']
 
-        if self.robust:
-            qnoise_loc = params['qnoise_loc']
-            qnoise_scale = params['qnoise_scale']
-            qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_loc, scale=qnoise_scale))
-            q_latent_vars = q_latent_vars + (qnoise, )
-            q_latent_vars_names.append('noise')
+        with tf.variable_scope('clvm_params'):
 
-        if self.sharedARD:
-            qalpha_loc = params['qalpha_loc']
-            qalpha_scale = params['qalpha_scale']
-            qalpha = ed.RandomVariable(tfp.distributions.LogNormal(loc=qalpha_loc, scale=qalpha_scale))
+            if self.robust:
+                qnoise_loc = params['qnoise_loc']
+                qnoise_scale = params['qnoise_scale']
+                qnoise = ed.RandomVariable(tfp.distributions.LogNormal(loc=qnoise_loc, scale=qnoise_scale))
+                q_latent_vars = q_latent_vars + (qnoise, )
+                q_latent_vars_names.append('noise')
 
-            qs_loc = params['qs_loc']
-            qs_scale = params['qs_scale']
-            qs = ed.Normal(loc=qs_loc, scale=qs_scale, name="qs")
-            q_latent_vars = q_latent_vars + (qs, qalpha, )
-            q_latent_vars_names.append('s')
-            q_latent_vars_names.append('alpha')
+            if self.sharedARD:
+                qalpha_loc = params['qalpha_loc']
+                qalpha_scale = params['qalpha_scale']
+                qalpha = ed.RandomVariable(tfp.distributions.LogNormal(loc=qalpha_loc, scale=qalpha_scale))
 
-        if self.targetARD:
-            qbeta_loc = params['qbeta_loc']
-            qbeta_scale = params['qbeta_scale']
-            qbeta = ed.RandomVariable(tfp.distributions.LogNormal(loc=qbeta_loc, scale=qbeta_scale))
+                qs_loc = params['qs_loc']
+                qs_scale = params['qs_scale']
+                qs = ed.Normal(loc=qs_loc, scale=qs_scale, name="qs")
+                q_latent_vars = q_latent_vars + (qs, qalpha, )
+                q_latent_vars_names.append('s')
+                q_latent_vars_names.append('alpha')
 
-            qw_loc = params['qw_loc']
-            qw_scale = params['qw_scale']
-            qw = ed.Normal(loc=qw_loc, scale=qw_scale, name="qw")
-            q_latent_vars = q_latent_vars + (qw, qbeta, )
-            q_latent_vars_names.append('w')
-            q_latent_vars_names.append('beta')
+            if self.targetARD:
+                qbeta_loc = params['qbeta_loc']
+                qbeta_scale = params['qbeta_scale']
+                qbeta = ed.RandomVariable(tfp.distributions.LogNormal(loc=qbeta_loc, scale=qbeta_scale))
+
+                qw_loc = params['qw_loc']
+                qw_scale = params['qw_scale']
+                qw = ed.Normal(loc=qw_loc, scale=qw_scale, name="qw")
+                q_latent_vars = q_latent_vars + (qw, qbeta, )
+                q_latent_vars_names.append('w')
+                q_latent_vars_names.append('beta')
 
         if self.target_missing:
             qtarget_loc = params['qx_loc']
@@ -409,28 +455,30 @@ class clvm:
         params = {'qzi_mean': qzi_mean, 'qzi_stddv': qzi_stddv, 'qti_mean': qti_mean, 'qti_stddv': qti_stddv,
                   'qzj_mean': qzj_mean, 'qzj_stddv': qzj_stddv}
 
-        if self.robust:
-            params['qnoise_loc'] = tf.Variable(tf.random.normal([1]), dtype=tf.float32, name='qnoise_loc')
-            params['qnoise_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([1], stddev=0.01), dtype=tf.float32),
-                                                    name='qnoise_scale')
+        with tf.variable_scope('clvm_params'):
 
-        if self.sharedARD:
-            params['qs_loc'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32, name='qs_loc')
-            params['qs_scale'] = tf.nn.softplus(
-                tf.Variable(tf.random.normal([self.k_shared, self.d], stddev=0.1), dtype=tf.float32), name='qs_scale')
+            if self.robust:
+                params['qnoise_loc'] = tf.Variable(tf.random.normal([1]), dtype=tf.float32, name='qnoise_loc')
+                params['qnoise_scale'] = tf.nn.softplus(tf.Variable(tf.random.normal([1], stddev=0.01), dtype=tf.float32),
+                                                        name='qnoise_scale')
 
-            params['qalpha_loc'] = tf.Variable(tf.random.normal([self.k_shared]), dtype=tf.float32, name='qalpha_loc')
-            params['qalpha_scale'] = tf.nn.softplus(
-                tf.Variable(tf.random_normal([self.k_shared], stddev=0.01), dtype=tf.float32), name='alpha_scale')
+            if self.sharedARD:
+                params['qs_loc'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32, name='qs_loc')
+                params['qs_scale'] = tf.nn.softplus(
+                    tf.Variable(tf.random.normal([self.k_shared, self.d], stddev=0.1), dtype=tf.float32), name='qs_scale')
 
-        if self.targetARD:
-            params['qw_loc'] = tf.Variable(tf.random.normal([self.k_target, self.d]), dtype=tf.float32, name='qw_loc')
-            params['qw_scale'] = tf.nn.softplus(
-                tf.Variable(tf.random.normal([self.k_target, self.d], stddev=0.1), dtype=tf.float32), name='qw_scale')
+                params['qalpha_loc'] = tf.Variable(tf.random.normal([self.k_shared]), dtype=tf.float32, name='qalpha_loc')
+                params['qalpha_scale'] = tf.nn.softplus(
+                    tf.Variable(tf.random_normal([self.k_shared], stddev=0.01), dtype=tf.float32), name='alpha_scale')
 
-            params['qbeta_loc'] = tf.Variable(tf.random_normal([self.k_target]), dtype=tf.float32, name='qbeta_loc')
-            params['qbeta_scale'] = tf.nn.softplus(
-                tf.Variable(tf.random.normal([self.k_target], stddev=0.01), dtype=tf.float32), name='qbeta_scale')
+            if self.targetARD:
+                params['qw_loc'] = tf.Variable(tf.random.normal([self.k_target, self.d]), dtype=tf.float32, name='qw_loc')
+                params['qw_scale'] = tf.nn.softplus(
+                    tf.Variable(tf.random.normal([self.k_target, self.d], stddev=0.1), dtype=tf.float32), name='qw_scale')
+
+                params['qbeta_loc'] = tf.Variable(tf.random_normal([self.k_target]), dtype=tf.float32, name='qbeta_loc')
+                params['qbeta_scale'] = tf.nn.softplus(
+                    tf.Variable(tf.random.normal([self.k_target], stddev=0.01), dtype=tf.float32), name='qbeta_scale')
 
         if self.target_missing:
             params['qx_loc'] = tf.Variable(tf.random_normal([self.idx_mis.shape[0]]), name='qx_loc')
@@ -613,12 +661,14 @@ class clvm:
         init = tf.global_variables_initializer()
 
         if saveGraph:
-            saver = tf.train.Saver()
+            saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
 
         learning_curve = []
 
         with tf.Session() as sess:
             sess.run(init)
+
+            print(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
 
             for i in range(num_epochs):
                 sess.run(train)
@@ -638,8 +688,6 @@ class clvm:
                 save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
                 print("Model saved in path: %s" % save_path)
 
-            ti_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qti_loc:0'))
-
         if plot:
             plt.figure()
             plt.plot(range(1, num_epochs, 5), learning_curve)
@@ -651,7 +699,7 @@ class clvm:
             ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
             for i, l in enumerate(np.sort(np.unique(labels))):
                 idx = np.where(labels == l)
-                plt.scatter(ti_hat[idx, 0], ti_hat[idx, 1], marker=ms[i], color=c[i])
+                plt.scatter(self.ti_hat[idx, 0], self.ti_hat[idx, 1], marker=ms[i], color=c[i])
             plt.title("Target Latent Space VI")
 
             # is below necessary?
@@ -662,9 +710,9 @@ class clvm:
             #     plt.figure()
             #     plt.imshow(x_complete)
 
-            plt.show()
+            #plt.show()
 
-        return ti_hat
+        return self.ti_hat
 
     def _save_MAP(self, sess, fp, fn, iter, learning_curve, seed):
         """
@@ -677,28 +725,30 @@ class clvm:
         :param seed: seed
         :return: None
         """
-        ti_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qti_loc:0'))
-        zi_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzi_loc:0'))
-        zj_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzj_loc:0'))
+        self.ti_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qti_loc:0'))
+        self.zi_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzi_loc:0'))
+        self.zj_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzj_loc:0'))
+
+        #with tf.variable_scope('clvm_params'):
 
         if self.sharedARD:
-            s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qs_loc:0'))
-            a_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qalpha_loc:0'))
-            factor_plot(s_hat, a_hat, fp, fn + 'VI_sharedFL' + str(seed) + '.png')
+            self.s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qs_loc:0'))
+            self.a_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qalpha_loc:0'))
+            factor_plot(self.s_hat, self.a_hat, fp, fn + 'VI_sharedFL' + str(seed) + '.png')
         else:
-            s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
+            self.s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/s:0'))
 
         if self.targetARD:
-            w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qw_loc:0'))
-            b_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qbeta_loc:0'))
-            factor_plot(w_hat, b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
+            self.w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qw_loc:0'))
+            self.b_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qbeta_loc:0'))
+            factor_plot(self.w_hat, self.b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
         else:
-            w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
+            self.w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/w:0'))
 
         if self.robust:
-            noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qnoise_loc:0'))
+            self.noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qnoise_loc:0'))
         else:
-            noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
+            self.noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/noise:0'))
 
         if self.target_missing:
             x_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qx_loc:0'))
@@ -711,12 +761,12 @@ class clvm:
             y_hat = None
 
         model = {'lb': learning_curve,
-                 'S': s_hat,
-                 'W': w_hat,
-                 'noise': noise_hat,
-                 'ti': ti_hat,
-                 'zi': zi_hat,
-                 'zj': zj_hat,
+                 'S': self.s_hat,
+                 'W': self.w_hat,
+                 'noise': self.noise_hat,
+                 'ti': self.ti_hat,
+                 'zi': self.zi_hat,
+                 'zj': self.zj_hat,
                  'x': x_hat,
                  'y': y_hat}
 
@@ -739,17 +789,20 @@ class clvm:
         params = self._initialize_variational_vars()
 
         if predict:
-            predict_params = {'qzi_mean': params['qzi_mean'], 'qzi_stddv': params['qzi_stddv'],
-                              'qti_mean': params['qti_mean'], 'qti_stddv': params['qti_stddv'],
-                              'qzj_mean': params['qzj_mean'], 'qzj_stddv': params['qzj_stddv']}
+            # predict_params = {'qzi_mean': params['qzi_mean'], 'qzi_stddv': params['qzi_stddv'],
+            #                   'qti_mean': params['qti_mean'], 'qti_stddv': params['qti_stddv'],
+            #                   'qzj_mean': params['qzj_mean'], 'qzj_stddv': params['qzj_stddv']}
 
-            vars, names = self._variational_model(predict_params)
+            vars, names = self._variational_model(params)
 
             qti = vars[names.index('ti')]
             qzi = vars[names.index('zi')]
             qzj = vars[names.index('zj')]
 
             qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti}
+            print('keys before session:', tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
+            print('params:', params)
+            #self.sharedARD = False
 
             energy = self._target(qtarget_vars)
             entropy = -self._target_q(qtarget_vars, params)
@@ -760,26 +813,22 @@ class clvm:
             test = optimizer.minimize(-elbo)
             learning_curve = []
 
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+        init = tf.global_variables_initializer()
 
         with tf.Session() as sess:
-
+            sess.run(init)
+            print('keys before load:', tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
             saver.restore(sess, fn)
-            print("t : %s" % predict_params['qti_mean'].eval())
+            #print("t : %s" % params['qti_mean'].eval())
 
             for i in range(num_epochs):
                 sess.run(test)
                 if i % 5 == 0:
                     learning_curve.append(sess.run([elbo]))
-                if i % 2000 == 0:
-                    #save model every 2000 iterations
-                    ti_hat = sess.run(predict_params['qti_mean'])
-                    zi_hat = sess.run(predict_params['qzi_mean'])
-                    zj_hat = sess.run(predict_params['qzj_mean'])
 
-            ti_hat = sess.run(predict_params['qti_mean'])
-            zi_hat = sess.run(predict_params['qzi_mean'])
-            zj_hat = sess.run(predict_params['qzj_mean'])
+            # for debugging
+            print(sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/s:0')))
 
             if plot:
                 plt.figure()
@@ -807,7 +856,7 @@ if __name__ == '__main__':
     parser.add_argument("--robust", default=False)
     parser.add_argument("--sharedARD", default=False)
     parser.add_argument("--targetARD", default=False)
-    parser.add_argument("--num_epochs", default=1000)
+    parser.add_argument("--num_epochs", default=5000)
     args = parser.parse_args()
 
     x_train, y_train, labels = build_toy_dataset()
@@ -819,7 +868,14 @@ if __name__ == '__main__':
     model.initialize()
     #model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
     model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
+    x_gen, y_gen = model.generate()
 
+    plt.figure()
+    plt.scatter(x_gen[:,0], x_gen[:,1], alpha=0.7, label='Generated Data')
+    plt.scatter(x_train[:,0], x_train[:,1], alpha=0.7, label='Training Data')
+    plt.legend()
+
+    plt.show()
 
 
 

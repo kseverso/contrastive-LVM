@@ -114,4 +114,4 @@ venv.bak/
 
 *.pkl
 checkpoint/
-
+*.png
