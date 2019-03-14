@@ -48,5 +48,5 @@ def build_toy_dataset():
 x_train, y_train, labels = build_toy_dataset()
 
 model = clvm(x_train, y_train, 10, 2)#, sharedARD=True)
-model.initialize()
-model.variational_inference(plot=True, num_epochs=10000, labels=labels, saveGraph=True)
+model.variational_inference(plot=True, num_epochs=1000, labels=labels, saveGraph=True)
+plt.show()
