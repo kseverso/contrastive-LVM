@@ -134,16 +134,9 @@ class clvm:
         if self.targetARD:
             self.b_hat = None
 
-        self.log_joint = None
-        self.log_q = None
-
-    def initialize(self):
-        """
-        Initialize the log joint probability functions for the cLVM and variational models
-        :return: None
-        """
         self.log_joint = ed.make_log_joint_fn(self._clvm_model)
         self.log_q = ed.make_log_joint_fn(self._variational_model)
+
 
     def _get_parameter(self, shape, name, pos_flag=False):
         """
@@ -177,32 +170,36 @@ class clvm:
                             1.0 / tf.nn.softplus(tf.get_variable("scale", shape)),
                             name=name)
 
-    def replace_params(self, z):
-
-        def interceptor(rv_constructor, *rv_args, **rv_kwargs):
-            name = rv_kwargs.pop("name")
-            if name == "w":
-                rv_kwargs["value"] = self.w_inferred
-            if name == "z":
-                rv_kwargs["value"] = z
-            return rv_constructor(*rv_args, **rv_kwargs)
-
-        return interceptor
-
     def generate(self):
 
-        var_list = {'zi': self.zi_hat, 'zj': self.zj_hat, 'ti': self.ti_hat, 'w': self.w_hat, 's': self.s_hat,
-                    'noise': self.noise_hat}
+        var_list = {'zi': self.zi_hat, 'zj': self.zj_hat, 'ti': self.ti_hat}#
+                    #, 'w': self.w_hat, 's': self.s_hat,'noise': self.noise_hat}
 
-        if self.sharedARD:
-            var_list['beta'] = self.b_hat
         if self.targetARD:
+            var_list['beta'] = self.b_hat
+            var_list['w'] = self.w_hat
+        else:
+            assign_w = tf.assign(tf.get_default_graph().get_tensor_by_name('clvm_params/w:0'), self.w_hat)
+        if self.sharedARD:
             var_list['alpha'] = self.a_hat
+            var_list['s'] = self.s_hat
+        else:
+            assign_s = tf.assign(tf.get_default_graph().get_tensor_by_name('clvm_params/s:0'), self.s_hat)
+        if self.robust:
+            var_list['noise'] = self.noise_hat
+        else:
+            assign_noise = tf.assign(tf.get_default_graph().get_tensor_by_name('clvm_params/noise:0'), self.noise_hat)
 
         with ed.interception(self._make_value_setter(**var_list)):
-            generate = self._clvm_model()
+                generate = self._clvm_model()
 
         with tf.Session() as sess:
+            if not self.sharedARD:
+                sess.run(assign_s)
+            if not self.targetARD:
+                sess.run(assign_w)
+            if not self.robust:
+                sess.run(assign_noise)
             (x_generated, y_generated), _ = sess.run(generate)
 
         return x_generated, y_generated
@@ -233,8 +230,7 @@ class clvm:
 
         latent_vars = (zi, zj, ti)
 
-
-        with tf.variable_scope('clvm_params'):
+        with tf.variable_scope('clvm_params', reuse=tf.AUTO_REUSE):
             # Parameters
             # Depending on the modeling choices, random, unobserved variables will be appended to latent_vars
             # shared factor loading
@@ -865,7 +861,6 @@ if __name__ == '__main__':
 
     model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust,
                  sharedARD=args.sharedARD, targetARD=args.targetARD)
-    model.initialize()
     #model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
     model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
     x_gen, y_gen = model.generate()
