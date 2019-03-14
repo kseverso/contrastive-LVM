@@ -58,3 +58,11 @@ Both have the option to specify:
 Both methods return the target latent representation and save the learned model and objective function to a folder named results. An example of variational inference applied to the above model would be:
 
 `t_hat = model.variational_inference(num_epochs=5000, fn='trained model', fp='../results/')`
+
+### Generative sampling
+Once a model has been trained, it is possible to generate samples using the posterior estimates. 
+
+`target_gen, background_gen = model.generate()`
+
+Currently `generate` has only one option: 
+* use_inferred: boolean to indicate if the inferred latent variables should be used, default=True. If false, samples are drawn from the latent variable prior distribution.
