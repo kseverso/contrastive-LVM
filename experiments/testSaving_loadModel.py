@@ -86,5 +86,5 @@ def build_toy_dataset():
 x_test, y_test, labels = build_toy_dataset()
 
 model = clvm(x_test, y_test, 10, 2)#, sharedARD=True)
-model.restore_graph(fl='./checkpoint/model1234.ckpt',plot=True, num_epochs=1000, labels=labels)
+model.restore_graph(fl='./checkpoint/model1234.ckpt',plot=True, num_epochs=1000, labels=labels, paramsOnly=False)
 plt.show()
