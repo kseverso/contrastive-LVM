@@ -485,7 +485,8 @@ class clvm:
         return params
 
 
-    def map(self, num_epochs=1500, plot=False, labels=None, seed=123, fn='model_MAP', fp='./results/'):
+    def map(self, num_epochs=10000, plot=False, labels=None, seed=123, fn='model_MAP', fp='./results/',
+            saveGraph=False, paramsOnly=True):
         """
         method to apply maximum a postiori inference to clvm
         :param num_epochs: optional, number of interations
@@ -530,6 +531,12 @@ class clvm:
 
         init = tf.global_variables_initializer()
 
+        if saveGraph:
+            if paramsOnly:
+                saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+            else:
+                saver = tf.train.Saver()
+
         learning_curve = []
 
         with tf.Session() as sess:
@@ -542,6 +549,10 @@ class clvm:
                     learning_curve.append(cE)
 
             self._save_MAP(sess, fp, fn, i, learning_curve, seed)
+
+            if saveGraph:
+                save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
+                print("Model saved in path: %s" % save_path)
 
         if plot:
 
@@ -723,7 +734,12 @@ class clvm:
                  'zi': self.zi_hat,
                  'zj': self.zj_hat,
                  'x': x_hat,
-                 'y': y_hat}
+                 'y': y_hat,
+                 'k_shared': self.k_shared,
+                 'k_target': self.k_target,
+                 'sharedARD': self.sharedARD,
+                 'targetARD': self.targetARD,
+                 'robust': self.robust}
 
         save_name = fp + fn + str(seed) + 'iter' + str(iter) + '.pkl'
         joblib.dump(model, save_name)

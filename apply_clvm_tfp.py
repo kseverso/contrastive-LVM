@@ -73,8 +73,8 @@ noise = noise
 """
 
 class apply_clvm:
-    def __init__(self, modelpkl, target_dataset, background_dataset=None, k_shared=10, k_target=2, robust_flag=False, sharedARD=False,
-                 targetARD=False, target_missing=False, background_missing=False):
+    def __init__(self, modelpkl, target_dataset, background_dataset=None,
+                 target_missing=False, background_missing=False):
         """
         Initialization for applying an existing clvm to new data
         :param target_dataset: numpy array of size n (observations) x d (measurements)
@@ -100,8 +100,8 @@ class apply_clvm:
             self.background_dataset = background_dataset
             self.background_predict = True
 
-        self.k_shared = k_shared
-        self.k_target = k_target
+        self.k_shared = modelpkl['k_shared']
+        self.k_target = modelpkl['k_target']
 
         #get posterior estimates from pkl
         self.w_inferred = modelpkl['W']
@@ -111,9 +111,9 @@ class apply_clvm:
         self.beta_inferred = modelpkl['beta']
 
         #flags for model variants
-        self.robust = robust_flag
-        self.targetARD = targetARD
-        self.sharedARD = sharedARD
+        self.robust = modelpkl['robust']
+        self.targetARD = modelpkl['targetARD']
+        self.sharedARD = modelpkl['sharedARD']
         self.target_missing = target_missing
         self.background_missing = background_missing
 
@@ -274,6 +274,7 @@ class apply_clvm:
                 observed_vars = observed_vars + (alpha, s,)
             else:
                 s = self._get_parameter([self.k_shared, self.d], "s")
+                observed_vars = observed_vars + (s,)
 
             # target factor loading
             if self.targetARD:
@@ -284,13 +285,14 @@ class apply_clvm:
                 observed_vars = observed_vars + (beta, w,)
             else:
                 w = self._get_parameter([self.k_target, self.d], "w")
+                observed_vars = observed_vars + (w,)
 
             # noise
             if self.robust:
                 noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
-                observed_vars = observed_vars + (noise,)
             else:
                 noise = self._get_parameter([1], "noise", True)
+            observed_vars = observed_vars + (noise,)
 
         return observed_vars, latent_vars
 
@@ -520,7 +522,12 @@ class apply_clvm:
                  'zi': self.zi_hat,
                  'zj': self.zj_hat,
                  'x': x_hat,
-                 'y': y_hat}
+                 'y': y_hat,
+                 'k_shared': self.k_shared,
+                 'k_target': self.k_target,
+                 'sharedARD': self.sharedARD,
+                 'targetARD': self.targetARD,
+                 'robust': self.robust}
 
         save_name = fp + fn + str(seed) + 'iter' + str(iter) + '.pkl'
         joblib.dump(model, save_name)
