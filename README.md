@@ -2,7 +2,7 @@
 Code for running and analyzing contrastive latent variable models (cLVMs). cLVM are described in K.A. Severson, S. Ghosh and K. Ng, 'Unsupervised learning with contrastive latent variable models' AAAI, 2019. Full details are available [here](https://arxiv.org/pdf/1811.06094.pdf). The cLVM model class is in `clvm_tfp.py`.
 
 ## Setting up the environment
-clvm requires tensorflow-probability which is currently in developement. To ensure that the model works, please use the associated environment. To create the environment:
+clvm requires tensorflow-probability which is currently in development. To ensure that the model works, please use the associated environment. To create the environment:
 
 `conda env create -f tfp_env.yml`
 
@@ -23,7 +23,7 @@ The clvm class requires:
 3. The dimension of the shared latent space (default 10)
 4. The dimension of the target latent space (default 2)
 
-Note that the target and background datasets do not need to have the same number of observations but do need to have the same number of measurements per observation. cLVM will not automatically check for this.
+Note that the target and background datasets do not need to have the same number of observations but do need to have the same number of measurements per observation. A warning will be printed if this is not true and inference will fail.
 
 Different versions of cLVMs can be used by setting certain flags to True:
 * robust_flag: Inverse Gamma prior on the noise
@@ -71,7 +71,7 @@ Currently `generate` has only one option:
 * use_inferred: boolean to indicate if the inferred latent variables should be used, default=True. If false, samples are drawn from the latent variable prior distribution.
 
 ### Saving and restoring the graph
-You can choose the save the full graph or only the parameters of the graph by specifying saveGraph=True and choosing the setting for paramsOnly. restore_graph assumes that you are restoring the graph to continue training. If the training process is continuing with a different dataset, paramsOnly=True. To restore the graph use
+You can choose the save the full graph or only the parameters of the graph by specifying `saveGraph=True` and choosing the setting for `paramsOnly`. `restore_graph` assumes that you are restoring the graph to continue training. If the training process is continuing with a different dataset, use `paramsOnly=True`. To restore the graph use
 
 `model.restore_graph(fl='.checkpoint/model1234.ckpt')`
 
@@ -89,9 +89,7 @@ plot: flag for plotting the target latent space (default False)
 Applying a trained cLVM model to new data uses a different class found in `apply_clvm_tfp.py`. The `apply_clvm` class requires:
 1. A model pkl for the learned cLVM
 2. A target dataset, with N rows of observations, each with D measurements. D must be the same as the dimensionality of the data used to train the model but N is unrestricted.
-3. The dimension of the shared latent space (default 10)
-4. The dimension of the target latent space (default 2)
 
-A background dataset can also be optional supplied. Flags should be provided to match the training settings with the exception of the missing data flags, which should reflect the training data.
+A background dataset can also be optional supplied. Model flags and dimensionality will be loaded from the model pkl automatically. Missing data flags should be specified to reflect the testing data.
 
 Inference follows as before, with the same options.
