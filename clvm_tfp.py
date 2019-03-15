@@ -90,6 +90,17 @@ class clvm:
                missing data should be indicated by elements equal to np.NaN
         """
 
+        #perform a few input checks
+        if type(target_dataset) is not np.ndarray:
+            print('Please input an nd array for the target dataset')
+            return
+        if type(background_dataset) is not np.ndarray:
+            print('Please input an nd array for the background dataset')
+            return
+        if target_dataset.shape[1] != background_dataset.shape[1]:
+            print('Warning: Datasets do not have the same dimensionality')
+            return
+
         self.n, self.d = target_dataset.shape
         self.m = background_dataset.shape[0]
         self.target_dataset = target_dataset
@@ -129,10 +140,8 @@ class clvm:
         self.w_hat = None
         self.s_hat = None
         self.noise_hat = None
-        if self.sharedARD:
-            self.a_hat = None
-        if self.targetARD:
-            self.b_hat = None
+        self.a_hat = None
+        self.b_hat = None
 
         self.log_joint = ed.make_log_joint_fn(self._clvm_model)
         self.log_q = ed.make_log_joint_fn(self._variational_model)
@@ -476,7 +485,7 @@ class clvm:
         return params
 
 
-    def map(self, num_epochs=1500, plot=False, labels=None, seed=0, fn='model_MAP', fp='./results/'):
+    def map(self, num_epochs=1500, plot=False, labels=None, seed=123, fn='model_MAP', fp='./results/'):
         """
         method to apply maximum a postiori inference to clvm
         :param num_epochs: optional, number of interations
@@ -489,7 +498,7 @@ class clvm:
         """
         tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
 
-        #tf.random.set_random_seed(seed)
+        tf.random.set_random_seed(seed)
 
         zi = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
         zj = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
@@ -532,38 +541,7 @@ class clvm:
                     cE, _cx, _cy, _ci = sess.run([energy, zi, zj, ti])
                     learning_curve.append(cE)
 
-            ti_hat = sess.run(ti)
-            zi_hat = sess.run(zi)
-            zj_hat = sess.run(zj)
-
-            if self.targetARD:
-                w_hat = sess.run(target_vars['w'])
-                b_hat = sess.run(target_vars['beta'])
-                factor_plot(w_hat, b_hat, './results/', 'targetFL.png')
-            else:
-                w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('w:0'))
-                plt.figure()
-                bpplt.hinton(w_hat)
-
-            if self.sharedARD:
-                s_hat = sess.run(target_vars['s'])
-                a_hat = sess.run(target_vars['alpha'])
-                factor_plot(s_hat, a_hat, './results/', 'sharedFL.png')
-            else:
-                s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('s:0'))
-
-            noise_hat = sess.run(tf.get_default_graph().get_tensor_by_name('noise:0'))
-
-            model = {'lb': learning_curve,
-                     'S': s_hat,
-                     'W': w_hat,
-                     'noise': noise_hat,
-                     'ti': ti_hat,
-                     'zi': zi_hat,
-                     'zj': zj_hat}
-
-            save_name = fn + str(seed) + 'iter' + str(i) + '.pkl'
-            joblib.dump(model, save_name)
+            self._save_MAP(sess, fp, fn, i, learning_curve, seed)
 
         if plot:
 
@@ -577,14 +555,14 @@ class clvm:
             plt.figure()
             for i, l in enumerate(np.sort(np.unique(labels))):
                 idx = np.where(labels == l)
-                plt.scatter(ti_hat[idx, 0], ti_hat[idx, 1], marker=ms[i], color=c[i])
+                plt.scatter(self.ti_hat[idx, 0], self.ti_hat[idx, 1], marker=ms[i], color=c[i])
             plt.title("Target Latent Space MAP")
             plt.show()
 
-        return ti_hat
+        return self.ti_hat
 
     def variational_inference(self, num_epochs=10000, plot=False, labels=None, seed=1234,
-                              fn='model_VI', fp='./results/', saveGraph=False):
+                              fn='model_VI', fp='./results/', saveGraph=False, paramsOnly=True):
         """
         method to perform variational inference on a clvm model
         :param num_epochs: optional, number of interations
@@ -645,7 +623,10 @@ class clvm:
         init = tf.global_variables_initializer()
 
         if saveGraph:
-            saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+            if paramsOnly:
+                saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+            else:
+                saver = tf.train.Saver()
 
         learning_curve = []
 
@@ -748,7 +729,7 @@ class clvm:
         joblib.dump(model, save_name)
 
     def restore_graph(self, fl="./checkpoint/Finalmodel.ckpt", num_epochs=10000, plot=False, labels=None, seed=1234,
-                      fn='model_VI', fp='./results/', saveGraph=False):
+                      fn='model_VI', fp='./results/', saveGraph=False, paramsOnly=True):
         """
         function to restore the values of a previously trained clvm
         :param fn: filename of the checkpoint file
@@ -798,9 +779,10 @@ class clvm:
         optimizer = tf.train.AdamOptimizer(learning_rate=0.01)
         train = optimizer.minimize(-elbo)
 
-        print('keys before session:', tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
-
-        saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+        if paramsOnly:
+            saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
+        else:
+            saver = tf.train.Saver()
         init = tf.global_variables_initializer()
 
         learning_curve = []
@@ -851,6 +833,7 @@ if __name__ == '__main__':
     parser.add_argument("--sharedARD", default=False)
     parser.add_argument("--targetARD", default=False)
     parser.add_argument("--num_epochs", default=5000)
+    parser.add_argument("--seed", default=0)
     args = parser.parse_args()
 
     x_train, y_train, labels = build_toy_dataset()
@@ -860,7 +843,7 @@ if __name__ == '__main__':
     model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust,
                  sharedARD=args.sharedARD, targetARD=args.targetARD)
     #model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
-    model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
+    model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels, seed=int(args.seed))
     x_gen, y_gen = model.generate()
 
     plt.figure()

@@ -26,6 +26,6 @@ def factor_plot(w, a, fp, fn, tick_label=None):
     plt.savefig(fp + fn)
 
     fig, ax = plt.subplots(1,1,dpi=300)
-    ax.plot(1/(a[order_w]), 'o')
+    ax.plot(1/(np.exp(a[order_w])), 'o')
     fig.tight_layout()
     fig.savefig(fp + 'alpha' + fn)
