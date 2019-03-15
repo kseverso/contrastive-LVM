@@ -49,11 +49,14 @@ The clvm class has two inference methods built in:
 2. VI
 
 Both have the option to specify:
-* num_epochs: number of iterations
-* plot: flag for plotting the target latent space
-* labels: labels for the plot
-* seed: set a particular seed
-* fn: filename to store the model results
+* num_epochs: number of iterations (default 10000)
+* plot: flag for plotting the target latent space (default False)
+* labels: labels for the plot (default None)
+* seed: set a particular seed (default 1234)
+* fn: filename to store the model results (default 'model_MAP'/'model_VI')
+* fp: filepath to store the model results (default './results')
+* saveGaph: flag for saving the tesnorflow graph (default False)
+* paramsOnly: flag to indicate if all of the variables in the graph should be saved or only the parameters;i.e. variables that are not a function of n (default True)
 
 Both methods return the target latent representation and save the learned model and objective function to a folder named results. An example of variational inference applied to the above model would be:
 
@@ -66,3 +69,29 @@ Once a model has been trained, it is possible to generate samples using the post
 
 Currently `generate` has only one option: 
 * use_inferred: boolean to indicate if the inferred latent variables should be used, default=True. If false, samples are drawn from the latent variable prior distribution.
+
+### Saving and restoring the graph
+You can choose the save the full graph or only the parameters of the graph by specifying saveGraph=True and choosing the setting for paramsOnly. restore_graph assumes that you are restoring the graph to continue training. If the training process is continuing with a different dataset, paramsOnly=True. To restore the graph use
+
+`model.restore_graph(fl='.checkpoint/model1234.ckpt')`
+
+restore_graph has the options:
+* fl: checkpoint file to load with the saved graph
+plot: flag for plotting the target latent space (default False)
+* labels: labels for the plot (default None)
+* seed: set a particular seed (default 1234)
+* fn: filename to store the model results (default 'model_MAP'/'model_VI')
+* fp: filepath to store the model results (default './results')
+* saveGaph: flag for saving the tesnorflow graph (default False)
+* paramsOnly: flag to indicate if all of the variables in the graph should be saved or only the parameters;i.e. variables that are not a function of n (default True)
+
+### Applying a trained cLVM model to test data
+Applying a trained cLVM model to new data uses a different class found in `apply_clvm_tfp.py`. The `apply_clvm` class requires:
+1. A model pkl for the learned cLVM
+2. A target dataset, with N rows of observations, each with D measurements. D must be the same as the dimensionality of the data used to train the model but N is unrestricted.
+3. The dimension of the shared latent space (default 10)
+4. The dimension of the target latent space (default 2)
+
+A background dataset can also be optional supplied. Flags should be provided to match the training settings with the exception of the missing data flags, which should reflect the training data.
+
+Inference follows as before, with the same options.
