@@ -1,6 +1,6 @@
 import numpy as np
 import sys
-sys.path.append('/Users/kristen.severson.ibm/PycharmProjects/cLVM/contrastive-LVM/')
+sys.path.append('../')
 from clvm_tfp import clvm
 import matplotlib.pyplot as plt
 from sklearn.externals import joblib
@@ -10,9 +10,9 @@ import seaborn as sns
 
 # Import data; data originally described in C. Higuera, K.J. Gardiner, and K.J. Cios, "Self-organizing feature maps
 # identify proteins critical to learning in a mouse model of down syndrome," PLOS ONE, vol 10, p e0129126, 2015.
-data = np.genfromtxt('/Users/kristen.severson.ibm/PycharmProjects/cPCA/contrastive/experiments/datasets/Data_Cortex_Nuclear.csv',
+data = np.genfromtxt('./datasets/Data_Cortex_Nuclear.csv',
                      delimiter=',',skip_header=1,usecols=range(1,78),filling_values=0)
-classes = np.genfromtxt('/Users/kristen.severson.ibm/PycharmProjects/cPCA/contrastive/experiments/datasets/Data_Cortex_Nuclear.csv',
+classes = np.genfromtxt('./datasets/Data_Cortex_Nuclear.csv',
                         delimiter=',',skip_header=1,usecols=range(78,81),dtype=None)
 
 target_idx_A = np.where((classes[:,-1]==b'S/C') & (classes[:,-2]==b'Saline') & (classes[:,-3]==b'Control'))[0]
@@ -58,7 +58,7 @@ for j in range(4):
     B_scaled = (B - np.mean(B, axis=0)) / np.nanstd(np.concatenate((A_inputed, B)), axis=0)
 
     model = clvm(A_inputed, B_scaled, Ks, Ki, target_missing=True, robust_flag=True)
-    t_clvm = model.variational_inference(seed=2, num_epochs=6000, plot=False)
+    t_clvm = model.variational_inference(seed=4, num_epochs=6000, plot=False)
 
     for i, l in enumerate(np.sort(np.unique(labels))):
         idx = np.where(labels == l)

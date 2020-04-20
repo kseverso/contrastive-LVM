@@ -627,33 +627,6 @@ class apply_clvm:
             plt.title("Target Latent Space VI")
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--k_shared", default=10)
-    parser.add_argument("--k_target", default=2)
-    parser.add_argument("--plot", default=True)
-    parser.add_argument("--robust", default=False)
-    parser.add_argument("--sharedARD", default=False)
-    parser.add_argument("--targetARD", default=False)
-    parser.add_argument("--num_epochs", default=5000)
-    args = parser.parse_args()
-
-    x_train, y_train, labels = build_toy_dataset()
-    print('shape of target data:', x_train.shape)
-    print('shape of background data:', y_train.shape)
-
-    model = clvm(x_train, y_train, int(args.k_shared), int(args.k_target), robust_flag=args.robust,
-                 sharedARD=args.sharedARD, targetARD=args.targetARD)
-    #model.map(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
-    model.variational_inference(plot=args.plot, num_epochs=int(args.num_epochs), labels=labels)
-    x_gen, y_gen = model.generate()
-
-    plt.figure()
-    plt.scatter(x_gen[:,0], x_gen[:,1], alpha=0.7, label='Generated Data')
-    plt.scatter(x_train[:,0], x_train[:,1], alpha=0.7, label='Training Data')
-    plt.legend()
-
-    plt.show()
 
 
 
