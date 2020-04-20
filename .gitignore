@@ -107,6 +107,9 @@ venv.bak/
 # results folder
 /results/
 
+# data folder
+/experiments/datasets
+
 .DS_Store
 
 #emacs temp

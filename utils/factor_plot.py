@@ -11,10 +11,9 @@ import bayespy.plot as bpplt
 
 def factor_plot(w, a, fp, fn, tick_label=None):
     '''
-
-    :param fn:
-    :param fp:
-    :param iter:
+    :param w: factor loading matrix to be plotted
+    :param fn: filename
+    :param fp: filepath
     :return:
     '''
     order_w = np.argsort(np.linalg.norm(w, axis=1))

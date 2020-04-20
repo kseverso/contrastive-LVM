@@ -485,93 +485,6 @@ class clvm:
         return params
 
 
-    def map(self, num_epochs=10000, plot=False, labels=None, seed=123, fn='model_MAP', fp='./results/',
-            saveGraph=False, paramsOnly=True):
-        """
-        method to apply maximum a postiori inference to clvm
-        :param num_epochs: optional, number of interations
-        :param plot: optaionl, boolean if plots should be created
-        :param labels: integers of size N
-        :param seed: optional, set the random seed
-        :param fn: optional, filename to store results
-        :param fp: optional, filepath to store the results
-        :return: MAP estimate of the target latent space
-        """
-        tf.reset_default_graph() #need to do this so that you don't get error that variable already exists!!
-
-        tf.random.set_random_seed(seed)
-
-        zi = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32)
-        zj = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32)
-        ti = tf.Variable(tf.random.normal([self.n, self.k_target]), dtype=tf.float32)
-
-        target_vars = {'zi': zi, 'zj': zj, 'ti': ti}
-
-        if self.robust:
-            target_vars['noise'] = tf.Variable(tf.nn.softplus(tf.random.normal(stddev=0.01)), dtype=tf.float32)
-
-        if self.targetARD:
-            target_vars['beta'] = tf.Variable(tf.nn.softplus(tf.random.normal([self.k_target])), dtype=tf.float32)
-            target_vars['w'] = tf.Variable(tf.random.normal([self.k_target, self.d]), dtype=tf.float32)
-
-        if self.sharedARD:
-            target_vars['alpha'] = tf.Variable(tf.nn.softplus(tf.random.normal([self.k_shared])), dtype=tf.float32)
-            target_vars['s'] = tf.Variable(tf.random.normal([self.k_shared, self.d]), dtype=tf.float32)
-
-        if self.target_missing:
-            target_vars['x_mis'] = tf.Variable(tf.random.normal([self.idx_mis.shape[0]]), dtype=tf.float32)
-
-        if self.background_missing:
-            target_vars['y_mis'] = tf.Variable(tf.random.normal([self.idy_mis.shape[0]]), dtype=tf.float32)
-
-        energy = -self._target(target_vars)
-
-        optimizer = tf.train.AdamOptimizer(learning_rate=0.05)
-        train = optimizer.minimize(energy)
-
-        init = tf.global_variables_initializer()
-
-        if saveGraph:
-            if paramsOnly:
-                saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 'clvm_params'))
-            else:
-                saver = tf.train.Saver()
-
-        learning_curve = []
-
-        with tf.Session() as sess:
-            sess.run(init)
-
-            for i in range(num_epochs):
-                sess.run(train)
-                if i % 5 == 0:
-                    cE, _cx, _cy, _ci = sess.run([energy, zi, zj, ti])
-                    learning_curve.append(cE)
-
-            self._save_MAP(sess, fp, fn, i, learning_curve, seed)
-
-            if saveGraph:
-                save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
-                print("Model saved in path: %s" % save_path)
-
-        if plot:
-
-            plt.figure()
-            plt.plot(range(1, num_epochs, 5), learning_curve)
-            plt.title("Learning Curve MAP")
-
-            c = ['k', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',
-                'tab:gray', 'tab:olive', 'tab:cyan']
-            ms = ['o', 's', '*', '^', 'v', ',', '<', '>', '8', 'p']
-            plt.figure()
-            for i, l in enumerate(np.sort(np.unique(labels))):
-                idx = np.where(labels == l)
-                plt.scatter(self.ti_hat[idx, 0], self.ti_hat[idx, 1], marker=ms[i], color=c[i])
-            plt.title("Target Latent Space MAP")
-            plt.show()
-
-        return self.ti_hat
-
     def variational_inference(self, num_epochs=10000, plot=False, labels=None, seed=1234,
                               fn='model_VI', fp='./results/', saveGraph=False, paramsOnly=True):
         """
@@ -650,13 +563,13 @@ class clvm:
                     learning_curve.append(sess.run([elbo]))
                 if i % 2000 == 0:
                     #save model every 2000 iterations
-                    self._save_MAP(sess, fp, fn, i, learning_curve, seed)
+                    self._save_MAP(sess, fp, fn, i, learning_curve, seed, plot)
 
                     if saveGraph:
                         save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
                         print("Model saved in path: %s" % save_path)
 
-            self._save_MAP(sess, fp, fn, i, learning_curve, seed)
+            self._save_MAP(sess, fp, fn, i, learning_curve, seed, plot)
 
             if saveGraph:
                 save_path = saver.save(sess, './checkpoint/model' + str(seed) + '.ckpt')
@@ -678,7 +591,7 @@ class clvm:
 
         return self.ti_hat
 
-    def _save_MAP(self, sess, fp, fn, iter, learning_curve, seed):
+    def _save_MAP(self, sess, fp, fn, iter, learning_curve, seed, plot):
         """
         internal function to save MAP estimates during VI; saves result to pkl file specified by filename and filepath
         :param sess: tensorflow session
@@ -696,7 +609,8 @@ class clvm:
         if self.sharedARD:
             self.s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qs_loc:0'))
             self.a_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qalpha_loc:0'))
-            factor_plot(self.s_hat, self.a_hat, fp, fn + 'VI_sharedFL' + str(seed) + '.png')
+            if plot:
+                factor_plot(self.s_hat, self.a_hat, fp, fn + 'VI_sharedFL' + str(seed) + '.png')
         else:
             self.s_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/s:0'))
             self.a_hat = None
@@ -704,7 +618,8 @@ class clvm:
         if self.targetARD:
             self.w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qw_loc:0'))
             self.b_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/qbeta_loc:0'))
-            factor_plot(self.w_hat, self.b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
+            if plot:
+                factor_plot(self.w_hat, self.b_hat, fp, fn + 'VI_targetFL' + str(seed) + '.png')
         else:
             self.w_hat = sess.run(tf.get_default_graph().get_tensor_by_name('clvm_params/w:0'))
             self.b_hat = None
