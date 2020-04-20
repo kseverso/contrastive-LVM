@@ -15,6 +15,7 @@ The environment can be deactivated using:
 `conda deactivate`
 
 ## Running the code
+See the jupyter notebook cLVM Sample Code in the experiments folder for a simple example of the model.
 
 ### Setting up the model
 The clvm class requires:
@@ -44,11 +45,9 @@ Once the model has been specified, it should be initialized:
 `model.initialize()`
 
 ### Performing inference
-The clvm class has two inference methods built in:
-1. MAP
-2. VI
+To perform inference on the clvm, use the variational inference function.
 
-Both have the option to specify:
+VI has the follwoing options to specify:
 * num_epochs: number of iterations (default 10000)
 * plot: flag for plotting the target latent space (default False)
 * labels: labels for the plot (default None)
@@ -58,7 +57,7 @@ Both have the option to specify:
 * saveGaph: flag for saving the tesnorflow graph (default False)
 * paramsOnly: flag to indicate if all of the variables in the graph should be saved or only the parameters;i.e. variables that are not a function of n (default True)
 
-Both methods return the target latent representation and save the learned model and objective function to a folder named results. An example of variational inference applied to the above model would be:
+VI returns the target latent representation and save the learned model and objective function to a folder named results. An example of variational inference applied to the above model would be:
 
 `t_hat = model.variational_inference(num_epochs=5000, fn='trained model', fp='../results/')`
 
