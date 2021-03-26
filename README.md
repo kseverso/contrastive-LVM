@@ -40,10 +40,6 @@ An example of a cLVM with shared spaced ARD and missing data in the test data wo
 
 `model = clvm(x_train, y_train, D-3, 2, shared_ARD=True, target_missing=True)`
 
-Once the model has been specified, it should be initialized:
-
-`model.initialize()`
-
 ### Performing inference
 To perform inference on the clvm, use the variational inference function.
 
