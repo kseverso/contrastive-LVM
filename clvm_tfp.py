@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 import argparse
 
-from utils.factor_plot import factor_plot
+#from utils.factor_plot import factor_plot
 
 from bayespy import plot as bpplt
 

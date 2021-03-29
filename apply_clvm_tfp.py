@@ -5,7 +5,7 @@ import numpy as np
 import seaborn as sns
 import argparse
 
-from utils.factor_plot import factor_plot
+#from utils.factor_plot import factor_plot
 
 from bayespy import plot as bpplt
 
@@ -93,12 +93,13 @@ class apply_clvm:
         self.n, self.d = target_dataset.shape
         self.target_dataset = target_dataset
 
-        self.background_predict = False
-
         if background_dataset is not None:
             self.m = background_dataset.shape[0]
             self.background_dataset = background_dataset
             self.background_predict = True
+        else:
+            self.background_predict = False
+            self.background_dataset = None
 
         self.k_shared = modelpkl['k_shared']
         self.k_target = modelpkl['k_target']
@@ -227,72 +228,73 @@ class apply_clvm:
         # Latent vectors
         # All models have at least zi, zj, and ti
         zi = ed.Normal(loc=tf.zeros([self.n, self.k_shared]), scale=tf.ones([self.n, self.k_shared]), name='zi')
-        zj = ed.Normal(loc=tf.zeros([self.m, self.k_shared]), scale=tf.ones([self.m, self.k_shared]), name='zj')
         ti = ed.Normal(loc=tf.zeros([self.n, self.k_target]), scale=tf.ones([self.n, self.k_target]), name='ti')
 
-        latent_vars = (zi, zj, ti)
+        latent_vars = (zi, ti)
 
         # Observed vectors, depends on the particular data, therefore not included in parameter scope
         if self.target_missing:
             ix_obs = self.idx_obs
             ix_mis = self.idx_mis
-            x = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), ix_obs),
-                          scale=tf.gather_nd(noise * tf.ones([self.n, self.d]), ix_obs), name="x")
-            x_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, s) + tf.matmul(ti, w), ix_mis),
-                              scale=tf.gather_nd(noise * tf.ones([self.n, self.d]), ix_mis), name="x_mis")
+            x = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, self.s_inferred) + tf.matmul(ti, self.w_inferred), ix_obs),
+                          scale=tf.gather_nd(self.noise_inferred * tf.ones([self.n, self.d]), ix_obs), name="x")
+            x_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zi, self.s_inferred) + tf.matmul(ti, self.w_inferred), ix_mis),
+                              scale=tf.gather_nd(self.noise_inferred * tf.ones([self.n, self.d]), ix_mis), name="x_mis")
             latent_vars = latent_vars + (x_mis,)
         else:
-            x = ed.Normal(loc=tf.matmul(zi, s) + tf.matmul(ti, w),
-                          scale=noise * tf.ones([self.n, self.d]), name="x")
+            x = ed.Normal(loc=tf.matmul(zi, self.s_inferred) + tf.matmul(ti, self.w_inferred),
+                          scale=self.noise_inferred * tf.ones([self.n, self.d]), name="x")
 
         observed_vars = x
 
         if self.background_predict:
+            zj = ed.Normal(loc=tf.zeros([self.m, self.k_shared]), scale=tf.ones([self.m, self.k_shared]), name='zj')
             if self.background_missing:
                 iy_obs = self.idy_obs
                 iy_mis = self.idy_mis
-                y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_obs),
-                              scale=tf.gather_nd(noise * tf.ones([self.m, self.d]), iy_obs), name="y")
-                y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, s), iy_mis),
-                                  scale=tf.gather_nd(noise * tf.ones([self.m, self.d]), iy_mis), name="y_mis")
+                y = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, self.s_inferred), iy_obs),
+                              scale=tf.gather_nd(self.noise_inferred * tf.ones([self.m, self.d]), iy_obs), name="y")
+                y_mis = ed.Normal(loc=tf.gather_nd(tf.matmul(zj, self.s_inferred), iy_mis),
+                                  scale=tf.gather_nd(self.noise_inferred * tf.ones([self.m, self.d]), iy_mis), name="y_mis")
                 latent_vars = latent_vars + (y_mis,)
             else:
                 y = ed.Normal(loc=tf.matmul(zj, s),
                               scale=noise * tf.ones([self.m, self.d]), name="y")
-            observed_vars = observed_vars + (y, )
+            observed_vars = observed_vars + (y,)
+            latent_vars = latent_vars + (zj, )
 
 
-        with tf.variable_scope('clvm_params', reuse=tf.AUTO_REUSE):
-            # Parameters
-            # Depending on the modeling choices, random, unobserved variables will be appended to latent_vars
-            # shared factor loading
-            if self.sharedARD:
-                alpha = ed.Gamma(concentration=1e-3*tf.ones([self.k_shared]),
-                                 rate=1e-3*tf.ones([self.k_shared]), name="alpha")
-                s = ed.Normal(loc=tf.zeros([self.k_shared, self.d]),
-                              scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.d])), name="s")
-                observed_vars = observed_vars + (alpha, s,)
-            else:
-                s = self._get_parameter([self.k_shared, self.d], "s")
-                observed_vars = observed_vars + (s,)
-
-            # target factor loading
-            if self.targetARD:
-                beta = ed.Gamma(concentration=1e-3*tf.ones([self.k_target]),
-                                rate=1e-3*tf.ones([self.k_target]), name="beta")
-                w = ed.Normal(loc=tf.zeros([self.k_target, self.d]),
-                              scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.d])), name="w")
-                observed_vars = observed_vars + (beta, w,)
-            else:
-                w = self._get_parameter([self.k_target, self.d], "w")
-                observed_vars = observed_vars + (w,)
-
-            # noise
-            if self.robust:
-                noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
-            else:
-                noise = self._get_parameter([1], "noise", True)
-            observed_vars = observed_vars + (noise,)
+        # with tf.variable_scope('clvm_params', reuse=tf.AUTO_REUSE):
+        #     # Parameters
+        #     # Depending on the modeling choices, random, unobserved variables will be appended to latent_vars
+        #     # shared factor loading
+        #     if self.sharedARD:
+        #         alpha = ed.Gamma(concentration=1e-3*tf.ones([self.k_shared]),
+        #                          rate=1e-3*tf.ones([self.k_shared]), name="alpha")
+        #         s = ed.Normal(loc=tf.zeros([self.k_shared, self.d]),
+        #                       scale=tf.einsum('i,j->ij', tf.reciprocal(alpha), tf.ones([self.d])), name="s")
+        #         observed_vars = observed_vars + (alpha, s,)
+        #     else:
+        #         s = self._get_parameter([self.k_shared, self.d], "s")
+        #         observed_vars = observed_vars + (s,)
+        #
+        #     # target factor loading
+        #     if self.targetARD:
+        #         beta = ed.Gamma(concentration=1e-3*tf.ones([self.k_target]),
+        #                         rate=1e-3*tf.ones([self.k_target]), name="beta")
+        #         w = ed.Normal(loc=tf.zeros([self.k_target, self.d]),
+        #                       scale=tf.einsum('i,j->ij', tf.reciprocal(beta), tf.ones([self.d])), name="w")
+        #         observed_vars = observed_vars + (beta, w,)
+        #     else:
+        #         w = self._get_parameter([self.k_target, self.d], "w")
+        #         observed_vars = observed_vars + (w,)
+        #
+        #     # noise
+        #     if self.robust:
+        #         noise = ed.Gamma(concentration=tf.ones([1]), rate=tf.ones([1]), name='noise')
+        #     else:
+        #         noise = self._get_parameter([1], "noise", True)
+        #     observed_vars = observed_vars + (noise,)
 
         return observed_vars, latent_vars
 
@@ -305,17 +307,35 @@ class apply_clvm:
         '''
         qzi_mean = params['qzi_mean']
         qzi_stddv = params['qzi_stddv']
-        qzj_mean = params['qzj_mean']
-        qzj_stddv = params['qzj_stddv']
         qti_mean = params['qti_mean']
         qti_stddv = params['qti_stddv']
 
         qzi = ed.Normal(loc=qzi_mean, scale=qzi_stddv, name="qzi")
-        qzj = ed.Normal(loc=qzj_mean, scale=qzj_stddv, name="qzj")
         qti = ed.Normal(loc=qti_mean, scale=qti_stddv, name="qti")
 
-        q_latent_vars = (qzi, qzj, qti)
-        q_latent_vars_names = ['zi', 'zj', 'ti']
+        if self.background_predict:
+            qzj_mean = params['qzj_mean']
+            qzj_stddv = params['qzj_stddv']
+            qzj = ed.Normal(loc=qzj_mean, scale=qzj_stddv, name="qzj")
+            q_latent_vars = (qzi, qzj, qti)
+            q_latent_vars_names = ['zi', 'zj', 'ti']
+        else:
+            q_latent_vars = (qzi, qti)
+            q_latent_vars_names = ['zi', 'ti']
+
+        if self.target_missing:
+            qtarget_loc = params['qx_loc']
+            qtarget_scale = params['qx_scale']
+            qx = ed.Normal(loc=qtarget_loc, scale=qtarget_scale, name="qx")
+            q_latent_vars = q_latent_vars + (qx, )
+            q_latent_vars_names.append('x_mis')
+
+        if self.background_missing:
+            qbackground_loc = params['qy_loc']
+            qbackground_scale = params['qy_scale']
+            qy = ed.Normal(loc=qbackground_loc, scale=qbackground_scale, name="qy")
+            q_latent_vars = q_latent_vars + (qy, )
+            q_latent_vars_names.append('y_mis')
 
         return q_latent_vars, q_latent_vars_names
 
@@ -326,17 +346,21 @@ class apply_clvm:
         :return: log_joint of the clvm model evaluated at target_vars
         """
         zi = target_vars['zi']
-        zj = target_vars['zj']
         ti = target_vars['ti']
 
         x_mis = []
         y_mis = []
+        zj = []
+
+        if self.background_predict:
+            zj = target_vars['zj']
 
         if self.target_missing:
             x_mis = target_vars['x_mis']
 
         if self.background_missing:
             y_mis = target_vars['y_mis']
+
 
         return self.log_joint(zi=zi, zj=zj, ti=ti, noise=self.noise_inferred, s=self.s_inferred,
                               alpha=self.alpha_inferred, w=self.w_inferred, beta=self.beta_inferred,
@@ -350,11 +374,14 @@ class apply_clvm:
         :return:
         """
         qzi = target_vars['zi']
-        qzj = target_vars['zj']
         qti = target_vars['ti']
 
         qx = []
         qy = []
+        qzj = []
+
+        if self.background_predict:
+            qzj = target_vars['zj']
 
         if self.target_missing:
             qx = target_vars['x_mis']
@@ -370,17 +397,19 @@ class apply_clvm:
         :return: dictionary of variational model parameters, sets up graph
         """
         qzi_mean = tf.Variable(tf.random.normal([self.n, self.k_shared]), dtype=tf.float32, name='qzi_loc')
-        qzj_mean = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32, name='qzj_loc')
         qti_mean = tf.Variable(tf.random.normal([self.n, self.k_target]), dtype=tf.float32, name='qti_loc')
         qzi_stddv = tf.nn.softplus(
             tf.Variable(tf.random.normal([self.n, self.k_shared], stddev=0.01), dtype=tf.float32), name='qzi_scale')
-        qzj_stddv = tf.nn.softplus(
-            tf.Variable(tf.random.normal([self.m, self.k_shared], stddev=0.01), dtype=tf.float32), name='qzj_scale')
         qti_stddv = tf.nn.softplus(
             tf.Variable(tf.random.normal([self.n, self.k_target], stddev=0.01), dtype=tf.float32), name='qti_scale')
 
-        params = {'qzi_mean': qzi_mean, 'qzi_stddv': qzi_stddv, 'qti_mean': qti_mean, 'qti_stddv': qti_stddv,
-                  'qzj_mean': qzj_mean, 'qzj_stddv': qzj_stddv}
+        params = {'qzi_mean': qzi_mean, 'qzi_stddv': qzi_stddv, 'qti_mean': qti_mean, 'qti_stddv': qti_stddv}
+
+        if self.background_predict:
+            params['qzj_mean'] = tf.Variable(tf.random.normal([self.m, self.k_shared]), dtype=tf.float32, name='qzj_loc')
+            params['qzj_stddv'] = tf.nn.softplus(
+                tf.Variable(tf.random.normal([self.m, self.k_shared], stddev=0.01), dtype=tf.float32), name='qzj_scale')
+
 
         if self.target_missing:
             params['qx_loc'] = tf.Variable(tf.random_normal([self.idx_mis.shape[0]]), name='qx_loc')
@@ -415,9 +444,12 @@ class apply_clvm:
 
         qti = vars[names.index('ti')]
         qzi = vars[names.index('zi')]
-        qzj = vars[names.index('zj')]
 
-        qtarget_vars = {'zi': qzi, 'zj': qzj, 'ti': qti}
+        qtarget_vars = {'zi': qzi, 'ti': qti}
+
+        if self.background_predict:
+            qzj = vars[names.index('zj')]
+            qtarget_vars['qzj'] = qzj
 
         if self.target_missing:
             qx = vars[names.index('x_mis')]
@@ -494,7 +526,10 @@ class apply_clvm:
         """
         self.ti_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qti_loc:0'))
         self.zi_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzi_loc:0'))
-        self.zj_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzj_loc:0'))
+        if self.background_predict:
+            self.zj_hat = sess.run(tf.get_default_graph().get_tensor_by_name('qzj_loc:0'))
+        else:
+            self.zj_hat = None
 
         self.s_hat = self.s_inferred
         self.w_hat = self.w_inferred
